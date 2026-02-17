@@ -1,0 +1,451 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../data/models/reader_settings.dart';
+import '../providers/settings_notifier.dart';
+import '../../../tts/presentation/widgets/tts_settings_section.dart';
+
+const Color _accentGreen = Color(0xFF4CAF50);
+
+class SettingsModal extends StatefulWidget {
+  const SettingsModal({super.key});
+
+  @override
+  State<SettingsModal> createState() => _SettingsModalState();
+}
+
+class _SettingsModalState extends State<SettingsModal> {
+  int _currentPage = 0;
+  late PageController _pageController;
+
+  @override
+  void initState() {
+    super.initState();
+    _pageController = PageController();
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = context.watch<SettingsNotifier>().settings;
+    final readerTheme = settings.readerTheme;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.55,
+      decoration: BoxDecoration(
+        color: readerTheme.backgroundColor,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        children: [
+          // Handle bar and tabs
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
+            child: Column(
+              children: [
+                // Handle bar
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: readerTheme.textColor.withAlpha(60),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Tab selector
+                _buildTabSelector(readerTheme),
+              ],
+            ),
+          ),
+
+          // Page content
+          Expanded(
+            child: PageView(
+              controller: _pageController,
+              onPageChanged: (index) => setState(() => _currentPage = index),
+              children: [
+                _buildTtsSettings(readerTheme),
+                _buildReaderSettings(context, readerTheme),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabSelector(ReaderTheme theme) {
+    return Row(
+      children: [
+        _buildTab('Text-to-Speech', 0, Icons.record_voice_over, theme),
+        const SizedBox(width: 12),
+        _buildTab('Reader', 1, Icons.auto_stories, theme),
+      ],
+    );
+  }
+
+  Widget _buildTab(String label, int index, IconData icon, ReaderTheme theme) {
+    final isSelected = _currentPage == index;
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          _pageController.animateToPage(
+            index,
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+          );
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: isSelected ? _accentGreen.withAlpha(30) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected ? _accentGreen : theme.textColor.withAlpha(40),
+              width: isSelected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                icon,
+                size: 18,
+                color: isSelected
+                    ? _accentGreen
+                    : theme.textColor.withAlpha(150),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  color: isSelected
+                      ? _accentGreen
+                      : theme.textColor.withAlpha(200),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReaderSettings(BuildContext context, ReaderTheme readerTheme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Theme Selector
+          Text(
+            'Reader Theme',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: readerTheme.textColor,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Consumer<SettingsNotifier>(
+            builder: (context, notifier, _) {
+              return Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: ReaderTheme.values.map((theme) {
+                  final isSelected = notifier.settings.readerTheme == theme;
+                  return GestureDetector(
+                    onTap: () => notifier.updateReaderTheme(theme),
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        color: theme.backgroundColor,
+                        shape: BoxShape.circle,
+                        border: isSelected
+                            ? Border.all(color: _accentGreen, width: 2.5)
+                            : Border.all(color: Colors.grey.withAlpha(60)),
+                        boxShadow: [
+                          if (isSelected)
+                            BoxShadow(
+                              color: _accentGreen.withAlpha(50),
+                              blurRadius: 8,
+                            ),
+                        ],
+                      ),
+                      child: Center(
+                        child: Text(
+                          'Aa',
+                          style: TextStyle(
+                            color: theme.textColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+
+          // Font Selector
+          Text(
+            'Font',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: readerTheme.textColor,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Consumer<SettingsNotifier>(
+            builder: (context, notifier, _) {
+              return Wrap(
+                spacing: 10,
+                runSpacing: 10,
+                children: [
+                  ...ReaderFont.values.where((f) => f != ReaderFont.custom).map(
+                    (font) {
+                      final isSelected = notifier.settings.font == font;
+                      return GestureDetector(
+                        onTap: () => notifier.updateFont(font),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: isSelected
+                                ? _accentGreen
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelected
+                                  ? _accentGreen
+                                  : readerTheme.textColor.withAlpha(60),
+                            ),
+                          ),
+                          child: Text(
+                            font == ReaderFont.serif
+                                ? 'Serif'
+                                : font == ReaderFont.sans
+                                ? 'Sans'
+                                : 'Mono',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: isSelected
+                                  ? Colors.white
+                                  : readerTheme.textColor,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.normal,
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  // Custom Font Chips
+                  ...notifier.settings.customFonts.map((customFont) {
+                    final isSelected =
+                        notifier.settings.font == ReaderFont.custom &&
+                        notifier.settings.selectedCustomFontId == customFont.id;
+                    return GestureDetector(
+                      onTap: () => notifier.selectCustomFont(customFont.id),
+                      onLongPress: () {
+                        // Show delete dialog or delete directly
+                        notifier.removeCustomFont(customFont.id);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isSelected ? _accentGreen : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSelected
+                                ? _accentGreen
+                                : readerTheme.textColor.withAlpha(60),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              customFont.name,
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: isSelected
+                                    ? Colors.white
+                                    : readerTheme.textColor,
+                                fontWeight: isSelected
+                                    ? FontWeight.w600
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                            if (isSelected) ...[
+                              const SizedBox(width: 4),
+                              GestureDetector(
+                                onTap: () =>
+                                    notifier.removeCustomFont(customFont.id),
+                                child: Icon(
+                                  Icons.close,
+                                  size: 14,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    );
+                  }),
+                  // Add Font Button
+                  GestureDetector(
+                    onTap: () => notifier.importCustomFont(),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: readerTheme.textColor.withAlpha(60),
+                          style: BorderStyle.solid,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.add,
+                            size: 16,
+                            color: readerTheme.textColor,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Add',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: readerTheme.textColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 24),
+
+          // Size Slider
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Size',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: readerTheme.textColor,
+                ),
+              ),
+              Consumer<SettingsNotifier>(
+                builder: (context, notifier, _) {
+                  return Text(
+                    '${notifier.settings.fontSize.toInt()}px',
+                    style: TextStyle(color: readerTheme.textColor),
+                  );
+                },
+              ),
+            ],
+          ),
+          Consumer<SettingsNotifier>(
+            builder: (context, notifier, _) {
+              return SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: _accentGreen,
+                  inactiveTrackColor: readerTheme.textColor.withAlpha(40),
+                  thumbColor: _accentGreen,
+                ),
+                child: Slider(
+                  value: notifier.settings.fontSize,
+                  min: 12,
+                  max: 32,
+                  divisions: 10,
+                  onChanged: (val) => notifier.updateFontSize(val),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+
+          // Line Height Slider
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Line Height',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: readerTheme.textColor,
+                ),
+              ),
+              Consumer<SettingsNotifier>(
+                builder: (context, notifier, _) {
+                  return Text(
+                    notifier.settings.lineHeight.toStringAsFixed(1),
+                    style: TextStyle(color: readerTheme.textColor),
+                  );
+                },
+              ),
+            ],
+          ),
+          Consumer<SettingsNotifier>(
+            builder: (context, notifier, _) {
+              return SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: _accentGreen,
+                  inactiveTrackColor: readerTheme.textColor.withAlpha(40),
+                  thumbColor: _accentGreen,
+                ),
+                child: Slider(
+                  value: notifier.settings.lineHeight,
+                  min: 1.0,
+                  max: 2.5,
+                  divisions: 15,
+                  onChanged: (val) => notifier.updateLineHeight(val),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTtsSettings(ReaderTheme readerTheme) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: TtsSettingsSection(
+        textColor: readerTheme.textColor,
+        backgroundColor: readerTheme.backgroundColor,
+        startExpanded: true,
+      ),
+    );
+  }
+}
