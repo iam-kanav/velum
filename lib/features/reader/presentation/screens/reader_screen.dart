@@ -79,6 +79,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   // Cached reference to avoid looking up ancestor in dispose()
   TtsNotifier? _ttsNotifier;
   ReaderNotifier? _readerNotifier;
+  HighlightNotifier? _highlightNotifier;
 
   @override
   void initState() {
@@ -101,8 +102,10 @@ class _ReaderScreenState extends State<ReaderScreen>
       _readerNotifier = context.read<ReaderNotifier>();
       _readerNotifier?.loadBook(widget.assetPath);
 
-      // Load highlights for this book
-      context.read<HighlightNotifier>().loadHighlights(widget.assetPath);
+      // Load highlights for this book and listen for removals
+      _highlightNotifier = context.read<HighlightNotifier>();
+      _highlightNotifier!.loadHighlights(widget.assetPath);
+      _highlightNotifier!.addListener(_onHighlightChanged);
 
       // Set up TTS callbacks and listener for highlight updates
       _ttsNotifier = context.read<TtsNotifier>();
@@ -154,6 +157,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _readerNotifier?.saveReadingPosition(_savedScrollPosition);
 
     WidgetsBinding.instance.removeObserver(this);
+    _highlightNotifier?.removeListener(_onHighlightChanged);
     _ttsNotifier?.removeListener(_onTtsStateChanged);
     _ttsNotifier?.onChapterComplete = null;
     _searchDebounce?.cancel();
@@ -168,6 +172,15 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _onTtsStateChanged() {
     if (_ttsNotifier != null) {
       _updateTtsHighlight(_ttsNotifier!);
+    }
+  }
+
+  /// Listener for highlight changes — removes deleted highlights from the WebView.
+  void _onHighlightChanged() {
+    final removedId = _highlightNotifier?.lastRemovedHighlightId;
+    if (removedId != null && _isPageReady) {
+      _highlightNotifier!.clearLastRemoved();
+      _controller.runJavaScript("window.removeHighlight('$removedId');");
     }
   }
 
@@ -507,9 +520,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               _pendingScrollHighlightId = null;
               // Small delay to let restoreHighlights finish rendering
               Future.delayed(const Duration(milliseconds: 300), () {
-                _controller.runJavaScript(
-                  "window.scrollToHighlight('$hlId');",
-                );
+                _controller.runJavaScript("window.scrollToHighlight('$hlId');");
               });
             }
           },
@@ -974,15 +985,16 @@ class _ReaderScreenState extends State<ReaderScreen>
                             IconButton(
                               key: _highlightsIconKey,
                               icon: Icon(
-                                Icons.bookmark_outline,
+                                Icons.bookmark,
                                 color: readerTheme.textColor,
                               ),
                               onPressed: () async {
-                                final highlight = await showModalBottomSheet<Highlight>(
-                                  context: context,
-                                  backgroundColor: Colors.transparent,
-                                  builder: (_) => const HighlightsModal(),
-                                );
+                                final highlight =
+                                    await showModalBottomSheet<Highlight>(
+                                      context: context,
+                                      backgroundColor: Colors.transparent,
+                                      builder: (_) => const HighlightsModal(),
+                                    );
                                 if (highlight != null && mounted) {
                                   _navigateToHighlight(highlight, notifier);
                                 }
@@ -1180,16 +1192,15 @@ class _ReaderScreenState extends State<ReaderScreen>
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(28),
-            border: Border.all(
-              color: readerTheme.textColor.withAlpha(30),
-            ),
+            border: Border.all(color: readerTheme.textColor.withAlpha(30)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               ...colorOptions.entries.map((entry) {
                 return GestureDetector(
-                  onTap: () => _applyHighlight(entry.key, entry.value, notifier),
+                  onTap: () =>
+                      _applyHighlight(entry.key, entry.value, notifier),
                   child: Container(
                     width: 32,
                     height: 32,
@@ -1377,9 +1388,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     if (sameChapter) {
       // Already on the right chapter — just scroll
-      _controller.runJavaScript(
-        "window.scrollToHighlight('${highlight.id}');",
-      );
+      _controller.runJavaScript("window.scrollToHighlight('${highlight.id}');");
     } else {
       // Different chapter — jump there, then scroll after page loads
       _pendingScrollHighlightId = highlight.id;
@@ -1406,12 +1415,16 @@ class _ReaderScreenState extends State<ReaderScreen>
       'orange': 'rgba(255, 183, 77, 0.4)',
     };
 
-    final jsonList = highlights.map((h) => {
-      'id': h.id,
-      'startOffset': h.startOffset,
-      'endOffset': h.endOffset,
-      'color': colorMap[h.color] ?? 'rgba(255, 241, 118, 0.4)',
-    }).toList();
+    final jsonList = highlights
+        .map(
+          (h) => {
+            'id': h.id,
+            'startOffset': h.startOffset,
+            'endOffset': h.endOffset,
+            'color': colorMap[h.color] ?? 'rgba(255, 241, 118, 0.4)',
+          },
+        )
+        .toList();
 
     final jsonStr = jsonEncode(jsonList).replaceAll("'", "\\'");
     _controller.runJavaScript("window.restoreHighlights('$jsonStr');");
@@ -1422,26 +1435,31 @@ class _ReaderScreenState extends State<ReaderScreen>
     final chapterIndex = notifier.currentChapterIndex;
 
     // Convert color to CSS rgba
-    final cssColor = 'rgba(${(color.r * 255).round()}, ${(color.g * 255).round()}, ${(color.b * 255).round()}, 0.4)';
+    final cssColor =
+        'rgba(${(color.r * 255).round()}, ${(color.g * 255).round()}, ${(color.b * 255).round()}, 0.4)';
 
     // Add to state/storage
-    highlightNotifier.addHighlight(
-      chapterIndex: chapterIndex,
-      text: _selectedText,
-      color: colorName,
-      startOffset: _selectionStartOffset,
-      endOffset: _selectionEndOffset,
-    ).then((_) {
-      // Get the newly added highlight to get its ID
-      final highlights = highlightNotifier.highlightsForChapter(chapterIndex);
-      final latest = highlights.isNotEmpty ? highlights.last : null;
-      if (latest != null) {
-        final escapedColor = cssColor.replaceAll("'", "\\'");
-        _controller.runJavaScript(
-          "window.applyHighlight($_selectionStartOffset, $_selectionEndOffset, '$escapedColor', '${latest.id}');",
-        );
-      }
-    });
+    highlightNotifier
+        .addHighlight(
+          chapterIndex: chapterIndex,
+          text: _selectedText,
+          color: colorName,
+          startOffset: _selectionStartOffset,
+          endOffset: _selectionEndOffset,
+        )
+        .then((_) {
+          // Get the newly added highlight to get its ID
+          final highlights = highlightNotifier.highlightsForChapter(
+            chapterIndex,
+          );
+          final latest = highlights.isNotEmpty ? highlights.last : null;
+          if (latest != null) {
+            final escapedColor = cssColor.replaceAll("'", "\\'");
+            _controller.runJavaScript(
+              "window.applyHighlight($_selectionStartOffset, $_selectionEndOffset, '$escapedColor', '${latest.id}');",
+            );
+          }
+        });
 
     setState(() => _showColorPicker = false);
   }

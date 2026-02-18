@@ -7,6 +7,57 @@ import 'package:epubx/epubx.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/scanned_book.dart';
 
+/// Top-level function for compute() — parses EPUB bytes in a background isolate.
+/// Must be top-level (not a method) so Dart can send it to the isolate.
+Future<ScannedBook> _parseEpubInIsolate(
+    (Uint8List bytes, String fileName, String filePath) params) async {
+  final (bytes, fileName, filePath) = params;
+  try {
+    final epubBook = await EpubReader.readBook(bytes);
+    String? coverBase64;
+    try {
+      coverBase64 = _extractCoverFromEpub(epubBook);
+    } catch (_) {}
+    return ScannedBook(
+      filePath: filePath,
+      title: epubBook.Title ?? fileName.replaceAll('.epub', ''),
+      author: epubBook.Author ?? 'Unknown Author',
+      addedAt: DateTime.now(),
+      coverBase64: coverBase64,
+    );
+  } catch (_) {
+    return ScannedBook(
+      filePath: filePath,
+      title: fileName.replaceAll('.epub', ''),
+      author: 'Unknown Author',
+      addedAt: DateTime.now(),
+    );
+  }
+}
+
+/// Top-level helper for cover extraction inside the isolate.
+String? _extractCoverFromEpub(EpubBook epubBook) {
+  if (epubBook.Content?.Images == null) return null;
+  final images = epubBook.Content!.Images!;
+  final coverPatterns = ['cover', 'front', 'title'];
+  for (final pattern in coverPatterns) {
+    for (final entry in images.entries) {
+      if (entry.key.toLowerCase().contains(pattern)) {
+        if (entry.value.Content != null) {
+          return base64Encode(entry.value.Content!);
+        }
+      }
+    }
+  }
+  if (images.isNotEmpty) {
+    final firstImage = images.values.first;
+    if (firstImage.Content != null) {
+      return base64Encode(firstImage.Content!);
+    }
+  }
+  return null;
+}
+
 class LibraryService {
   static const String _booksKey = 'scanned_books';
   static const String _onboardingCompleteKey = 'onboarding_complete';
@@ -139,17 +190,14 @@ class LibraryService {
 
           try {
             final bytes = await entity.readAsBytes();
-            final book = await _extractBookInfoFromBytes(
-              bytes,
-              entity.path.split('/').last,
-              entity.path,
+            final fileName = entity.path.split('/').last;
+            final book = await compute(
+              _parseEpubInIsolate,
+              (bytes, fileName, entity.path),
             );
-            if (book != null) {
-              foundBooks.add(book);
-              onProgress?.call(foundBooks.length);
-            }
+            foundBooks.add(book);
+            onProgress?.call(foundBooks.length);
           } catch (e) {
-            // Still add with filename if parsing fails
             final fileName = entity.path.split('/').last;
             foundBooks.add(
               ScannedBook(
@@ -191,17 +239,13 @@ class LibraryService {
       for (final file in result.files) {
         if (file.bytes != null) {
           try {
-            final book = await _extractBookInfoFromBytes(
-              file.bytes!,
-              file.name,
-              file.path ?? file.name,
+            final book = await compute(
+              _parseEpubInIsolate,
+              (file.bytes!, file.name, file.path ?? file.name),
             );
-            if (book != null) {
-              newBooks.add(book);
-            }
+            newBooks.add(book);
           } catch (e) {
             debugPrint('Failed to parse ${file.name}: $e');
-            // Still add the book with just filename info
             newBooks.add(
               ScannedBook(
                 filePath: file.path ?? file.name,
@@ -230,81 +274,6 @@ class LibraryService {
     }
   }
 
-  Future<ScannedBook?> _extractBookInfoFromBytes(
-    Uint8List bytes,
-    String fileName,
-    String filePath,
-  ) async {
-    try {
-      final epubBook = await EpubReader.readBook(bytes);
-
-      // Extract cover image
-      String? coverBase64;
-      try {
-        coverBase64 = _extractCoverImage(epubBook);
-      } catch (e) {
-        debugPrint('Failed to extract cover: $e');
-      }
-
-      return ScannedBook(
-        filePath: filePath,
-        title: epubBook.Title ?? fileName.replaceAll('.epub', ''),
-        author: epubBook.Author ?? 'Unknown Author',
-        addedAt: DateTime.now(),
-        coverBase64: coverBase64,
-      );
-    } catch (e) {
-      // If EPUB parsing fails, use filename
-      return ScannedBook(
-        filePath: filePath,
-        title: fileName.replaceAll('.epub', ''),
-        author: 'Unknown Author',
-        addedAt: DateTime.now(),
-      );
-    }
-  }
-
-  /// Extract cover image from EPUB and return as base64 string
-  String? _extractCoverImage(EpubBook epubBook) {
-    // Try to get cover from Content.Images
-    if (epubBook.Content?.Images != null) {
-      final images = epubBook.Content!.Images!;
-
-      // Look for cover image by common naming patterns
-      final coverPatterns = [
-        'cover',
-        'Cover',
-        'COVER',
-        'front',
-        'Front',
-        'title',
-        'Title',
-      ];
-
-      // First try: find by name containing "cover"
-      for (final pattern in coverPatterns) {
-        for (final entry in images.entries) {
-          if (entry.key.toLowerCase().contains(pattern.toLowerCase())) {
-            if (entry.value.Content != null) {
-              return base64Encode(entry.value.Content!);
-            }
-          }
-        }
-      }
-
-      // Second try: get the first image (often the cover)
-      if (images.isNotEmpty) {
-        final firstImage = images.values.first;
-        if (firstImage.Content != null) {
-          return base64Encode(firstImage.Content!);
-        }
-      }
-    }
-
-    // Note: epubBook.CoverImage is an Image type, not bytes
-    // The cover search in Content.Images above should suffice
-    return null;
-  }
 
   // ════════════════════════════════════════════════════════════════════════════
   // BOOK STORAGE

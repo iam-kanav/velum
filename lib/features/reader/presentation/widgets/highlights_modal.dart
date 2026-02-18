@@ -104,7 +104,8 @@ class HighlightsModal extends StatelessWidget {
                     children: grouped.entries.map((entry) {
                       final colorName = entry.key;
                       final highlights = entry.value;
-                      final dotColor = highlightColors[colorName] ?? Colors.grey;
+                      final dotColor =
+                          highlightColors[colorName] ?? Colors.grey;
 
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -135,14 +136,16 @@ class HighlightsModal extends StatelessWidget {
                             ),
                           ),
                           // Highlight cards
-                          ...highlights.map((h) => _buildHighlightCard(
-                                context,
-                                h,
-                                dotColor,
-                                readerTheme,
-                                highlightNotifier,
-                                readerNotifier,
-                              )),
+                          ...highlights.map(
+                            (h) => _buildHighlightCard(
+                              context,
+                              h,
+                              dotColor,
+                              readerTheme,
+                              highlightNotifier,
+                              readerNotifier,
+                            ),
+                          ),
                         ],
                       );
                     }).toList(),
@@ -162,13 +165,14 @@ class HighlightsModal extends StatelessWidget {
     ReaderNotifier readerNotifier,
   ) {
     final chapters = readerNotifier.currentBook?.Chapters;
-    final chapterName = chapters != null && highlight.chapterIndex < chapters.length
-        ? chapters[highlight.chapterIndex].Title ?? 'Chapter ${highlight.chapterIndex + 1}'
+    final chapterName =
+        chapters != null && highlight.chapterIndex < chapters.length
+        ? chapters[highlight.chapterIndex].Title ??
+              'Chapter ${highlight.chapterIndex + 1}'
         : 'Chapter ${highlight.chapterIndex + 1}';
 
     return InkWell(
       onTap: () {
-        // Return the highlight so the reader screen can navigate + scroll
         Navigator.pop(context, highlight);
       },
       child: Container(
@@ -177,9 +181,7 @@ class HighlightsModal extends StatelessWidget {
         decoration: BoxDecoration(
           color: dotColor.withAlpha(20),
           borderRadius: BorderRadius.circular(10),
-          border: Border(
-            left: BorderSide(color: dotColor, width: 3),
-          ),
+          border: Border(left: BorderSide(color: dotColor, width: 3)),
         ),
         child: Row(
           children: [

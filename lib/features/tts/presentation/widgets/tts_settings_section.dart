@@ -5,6 +5,59 @@ import '../providers/tts_notifier.dart';
 
 const Color _accentGreen = Color(0xFF4CAF50);
 
+const _languageNames = <String, String>{
+  'af': 'Afrikaans', 'am': 'Amharic', 'ar': 'Arabic', 'az': 'Azerbaijani',
+  'be': 'Belarusian', 'bg': 'Bulgarian', 'bn': 'Bengali', 'bs': 'Bosnian',
+  'ca': 'Catalan', 'cs': 'Czech', 'cy': 'Welsh', 'da': 'Danish',
+  'de': 'German', 'el': 'Greek', 'en': 'English', 'es': 'Spanish',
+  'et': 'Estonian', 'eu': 'Basque', 'fa': 'Persian', 'fi': 'Finnish',
+  'fil': 'Filipino', 'fr': 'French', 'gl': 'Galician', 'gu': 'Gujarati',
+  'ha': 'Hausa', 'he': 'Hebrew', 'hi': 'Hindi', 'hr': 'Croatian',
+  'hu': 'Hungarian', 'hy': 'Armenian', 'id': 'Indonesian', 'is': 'Icelandic',
+  'it': 'Italian', 'ja': 'Japanese', 'jv': 'Javanese', 'ka': 'Georgian',
+  'kk': 'Kazakh', 'km': 'Khmer', 'kn': 'Kannada', 'ko': 'Korean',
+  'lo': 'Lao', 'lt': 'Lithuanian', 'lv': 'Latvian', 'mk': 'Macedonian',
+  'ml': 'Malayalam', 'mn': 'Mongolian', 'mr': 'Marathi', 'ms': 'Malay',
+  'my': 'Burmese', 'nb': 'Norwegian', 'ne': 'Nepali', 'nl': 'Dutch',
+  'no': 'Norwegian', 'pa': 'Punjabi', 'pl': 'Polish', 'pt': 'Portuguese',
+  'ro': 'Romanian', 'ru': 'Russian', 'si': 'Sinhala', 'sk': 'Slovak',
+  'sl': 'Slovenian', 'so': 'Somali', 'sq': 'Albanian', 'sr': 'Serbian',
+  'su': 'Sundanese', 'sv': 'Swedish', 'sw': 'Swahili', 'ta': 'Tamil',
+  'te': 'Telugu', 'th': 'Thai', 'tr': 'Turkish', 'uk': 'Ukrainian',
+  'ur': 'Urdu', 'uz': 'Uzbek', 'vi': 'Vietnamese', 'yo': 'Yoruba',
+  'yue': 'Cantonese', 'zh': 'Chinese', 'zu': 'Zulu',
+};
+
+const _regionNames = <String, String>{
+  'AU': 'Australia', 'BD': 'Bangladesh', 'BE': 'Belgium', 'BR': 'Brazil',
+  'CA': 'Canada', 'CH': 'Switzerland', 'CN': 'China', 'DE': 'Germany',
+  'DK': 'Denmark', 'EG': 'Egypt', 'ES': 'Spain', 'FI': 'Finland',
+  'FR': 'France', 'GB': 'UK', 'GH': 'Ghana', 'GR': 'Greece',
+  'HK': 'Hong Kong', 'ID': 'Indonesia', 'IE': 'Ireland', 'IL': 'Israel',
+  'IN': 'India', 'IT': 'Italy', 'JP': 'Japan', 'KE': 'Kenya',
+  'KR': 'Korea', 'MX': 'Mexico', 'MY': 'Malaysia', 'NG': 'Nigeria',
+  'NL': 'Netherlands', 'NO': 'Norway', 'NZ': 'New Zealand', 'PH': 'Philippines',
+  'PK': 'Pakistan', 'PL': 'Poland', 'PT': 'Portugal', 'RO': 'Romania',
+  'RU': 'Russia', 'SA': 'Saudi Arabia', 'SE': 'Sweden', 'SG': 'Singapore',
+  'TH': 'Thailand', 'TR': 'Turkey', 'TW': 'Taiwan', 'TZ': 'Tanzania',
+  'UA': 'Ukraine', 'UK': 'UK', 'US': 'US', 'VN': 'Vietnam',
+  'ZA': 'South Africa',
+};
+
+/// Format a locale code like "en-US" into "English (US)"
+String _friendlyLanguageName(String locale) {
+  // Normalise separators
+  final parts = locale.replaceAll('_', '-').split('-');
+  final langCode = parts.first.toLowerCase();
+  final lang = _languageNames[langCode] ?? langCode;
+  if (parts.length > 1) {
+    final regionCode = parts[1].toUpperCase();
+    final region = _regionNames[regionCode] ?? regionCode;
+    return '$lang ($region)';
+  }
+  return lang;
+}
+
 /// TTS settings section for inclusion in settings modal
 class TtsSettingsSection extends StatefulWidget {
   final Color textColor;
@@ -117,12 +170,13 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             value: settings.language,
             items:
                 (ttsNotifier.availableLanguages.toList()
-                      ..sort((a, b) => a.toString().compareTo(b.toString())))
+                      ..sort((a, b) => _friendlyLanguageName(a.toString())
+                          .compareTo(_friendlyLanguageName(b.toString()))))
                     .map(
                       (lang) => DropdownMenuItem<String>(
                         value: lang.toString(),
                         child: Text(
-                          lang.toString(),
+                          _friendlyLanguageName(lang.toString()),
                           style: TextStyle(
                             color: widget.textColor,
                             fontSize: 13,
@@ -303,13 +357,13 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
               ),
             ),
             items: voices
+                .asMap()
+                .entries
                 .map(
-                  (v) => DropdownMenuItem<String>(
-                    value: v['name'] as String,
+                  (entry) => DropdownMenuItem<String>(
+                    value: entry.value['name'] as String,
                     child: Text(
-                      (v['name'] as String).length > 18
-                          ? '${(v['name'] as String).substring(0, 18)}...'
-                          : v['name'] as String,
+                      'Voice ${entry.key + 1}',
                       style: TextStyle(color: widget.textColor, fontSize: 13),
                     ),
                   ),
@@ -460,7 +514,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         Switch(
           value: ttsNotifier.settings.autoContinue,
           onChanged: (value) => ttsNotifier.updateAutoContinue(value),
-          activeThumbColor: Theme.of(context).primaryColor,
+          activeColor: _accentGreen,
+          activeTrackColor: _accentGreen.withAlpha(80),
         ),
       ],
     );
@@ -493,7 +548,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           value: ttsNotifier.settings.stopOnAudioFocusLoss,
           onChanged: (value) =>
               ttsNotifier.updateStopOnAudioFocusLoss(value),
-          activeThumbColor: Theme.of(context).primaryColor,
+          activeColor: _accentGreen,
+          activeTrackColor: _accentGreen.withAlpha(80),
         ),
       ],
     );

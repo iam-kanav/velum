@@ -149,10 +149,15 @@ class LibraryNotifier extends ChangeNotifier {
     notifyListeners();
 
     try {
+      final stopwatch = Stopwatch()..start();
       _books = await _libraryService.scanDeviceForEpubs(
         onProgress: (count) {
           _scanProgress = count;
-          notifyListeners();
+          // Throttle UI updates to max once every 500ms
+          if (stopwatch.elapsedMilliseconds >= 500) {
+            stopwatch.reset();
+            notifyListeners();
+          }
         },
       );
     } finally {

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
@@ -467,11 +468,7 @@ class SettingsScreen extends StatelessWidget {
               ),
               child: Text(
                 displayName,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: isSelected ? Colors.white : theme.textColor,
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
+                style: _fontChipStyle(font, isSelected, theme),
               ),
             ),
           );
@@ -550,6 +547,28 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
+  TextStyle _fontChipStyle(
+    ReaderFont font,
+    bool isSelected,
+    ReaderTheme theme,
+  ) {
+    final color = isSelected ? Colors.white : theme.textColor;
+    final weight = isSelected ? FontWeight.w600 : FontWeight.normal;
+    switch (font) {
+      case ReaderFont.serif:
+        return GoogleFonts.merriweather(
+          fontSize: 13, color: color, fontWeight: weight);
+      case ReaderFont.sans:
+        return GoogleFonts.inter(
+          fontSize: 13, color: color, fontWeight: weight);
+      case ReaderFont.mono:
+        return GoogleFonts.robotoMono(
+          fontSize: 13, color: color, fontWeight: weight);
+      case ReaderFont.custom:
+        return TextStyle(fontSize: 13, color: color, fontWeight: weight);
+    }
+  }
+
   Widget _buildSliderRow(
     String label,
     String value,
@@ -623,14 +642,28 @@ class SettingsScreen extends StatelessWidget {
           'The quick brown fox jumps over the lazy dog.\n\n'
           'Lorem ipsum dolor sit amet, consectetur adipiscing elit. '
           'Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
-          style: TextStyle(
-            fontSize: settings.fontSize,
-            height: settings.lineHeight,
-            color: readerTheme.textColor,
-          ),
+          style: _previewTextStyle(settings, readerTheme),
         ),
       ),
     );
+  }
+
+  TextStyle _previewTextStyle(ReaderSettings settings, ReaderTheme readerTheme) {
+    final base = TextStyle(
+      fontSize: settings.fontSize,
+      height: settings.lineHeight,
+      color: readerTheme.textColor,
+    );
+    switch (settings.font) {
+      case ReaderFont.serif:
+        return GoogleFonts.merriweather(textStyle: base);
+      case ReaderFont.sans:
+        return GoogleFonts.inter(textStyle: base);
+      case ReaderFont.mono:
+        return GoogleFonts.robotoMono(textStyle: base);
+      case ReaderFont.custom:
+        return base;
+    }
   }
 
   Color _getCardColor(ReaderTheme theme) {

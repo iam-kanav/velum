@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../../data/models/reader_settings.dart';
 import '../providers/settings_notifier.dart';
@@ -240,14 +241,10 @@ class _SettingsModalState extends State<SettingsModal> {
                                 : font == ReaderFont.sans
                                 ? 'Sans'
                                 : 'Mono',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: isSelected
-                                  ? Colors.white
-                                  : readerTheme.textColor,
-                              fontWeight: isSelected
-                                  ? FontWeight.w600
-                                  : FontWeight.normal,
+                            style: _fontChipStyle(
+                              font,
+                              isSelected,
+                              readerTheme,
                             ),
                           ),
                         ),
@@ -436,6 +433,28 @@ class _SettingsModalState extends State<SettingsModal> {
         ],
       ),
     );
+  }
+
+  TextStyle _fontChipStyle(
+    ReaderFont font,
+    bool isSelected,
+    ReaderTheme readerTheme,
+  ) {
+    final color = isSelected ? Colors.white : readerTheme.textColor;
+    final weight = isSelected ? FontWeight.w600 : FontWeight.normal;
+    switch (font) {
+      case ReaderFont.serif:
+        return GoogleFonts.merriweather(
+          fontSize: 13, color: color, fontWeight: weight);
+      case ReaderFont.sans:
+        return GoogleFonts.inter(
+          fontSize: 13, color: color, fontWeight: weight);
+      case ReaderFont.mono:
+        return GoogleFonts.robotoMono(
+          fontSize: 13, color: color, fontWeight: weight);
+      case ReaderFont.custom:
+        return TextStyle(fontSize: 13, color: color, fontWeight: weight);
+    }
   }
 
   Widget _buildTtsSettings(ReaderTheme readerTheme) {

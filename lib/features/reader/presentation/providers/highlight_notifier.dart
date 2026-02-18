@@ -9,10 +9,15 @@ class HighlightNotifier extends ChangeNotifier {
 
   String? _currentBookPath;
   List<Highlight> _highlights = [];
+  String? _lastRemovedHighlightId;
 
   HighlightNotifier(this._service);
 
   List<Highlight> get highlights => _highlights;
+
+  /// The ID of the most recently removed highlight (consumed by the reader to update the WebView).
+  String? get lastRemovedHighlightId => _lastRemovedHighlightId;
+  void clearLastRemoved() => _lastRemovedHighlightId = null;
 
   /// Grouped by color for display in highlights modal
   Map<String, List<Highlight>> get highlightsByColor {
@@ -60,6 +65,7 @@ class HighlightNotifier extends ChangeNotifier {
     if (_currentBookPath == null) return;
     await _service.removeHighlight(_currentBookPath!, id);
     _highlights = _service.getHighlights(_currentBookPath!);
+    _lastRemovedHighlightId = id;
     notifyListeners();
   }
 }
