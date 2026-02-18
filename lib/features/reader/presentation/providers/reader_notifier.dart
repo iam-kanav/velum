@@ -1,11 +1,83 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:epubx/epubx.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import '../../data/services/epub_service.dart';
 import '../../../library/data/services/library_service.dart';
+
+class GlobalSearchResult {
+  final int chapterIndex;
+  final String chapterTitle;
+  final String snippetBefore;
+  final String matchedText;
+  final String snippetAfter;
+  final double positionPercent;
+
+  const GlobalSearchResult({
+    required this.chapterIndex,
+    required this.chapterTitle,
+    required this.snippetBefore,
+    required this.matchedText,
+    required this.snippetAfter,
+    required this.positionPercent,
+  });
+}
+
+/// Top-level function for compute() – runs search off main thread.
+List<GlobalSearchResult> _searchChaptersIsolate(Map<String, dynamic> params) {
+  final query = params['query'] as String;
+  final chapters = params['chapters'] as List<Map<String, String>>;
+  final lowerQuery = query.toLowerCase();
+  final results = <GlobalSearchResult>[];
+
+  for (int i = 0; i < chapters.length; i++) {
+    final html = chapters[i]['html'] ?? '';
+    final title = chapters[i]['title'] ?? 'Chapter ${i + 1}';
+
+    // Parse HTML to plain text
+    final document = html_parser.parse(html);
+    final body = document.body;
+    if (body == null) continue;
+    final plainText = body.text;
+    if (plainText.isEmpty) continue;
+
+    final lowerText = plainText.toLowerCase();
+    int searchFrom = 0;
+
+    while (true) {
+      final idx = lowerText.indexOf(lowerQuery, searchFrom);
+      if (idx == -1) break;
+
+      // Build snippet with ~30 chars of context
+      final snippetStart = (idx - 30).clamp(0, plainText.length);
+      final snippetEnd = (idx + query.length + 30).clamp(0, plainText.length);
+
+      final before = (snippetStart > 0 ? '...' : '') +
+          plainText.substring(snippetStart, idx);
+      final matched = plainText.substring(idx, idx + query.length);
+      final after = plainText.substring(idx + query.length, snippetEnd) +
+          (snippetEnd < plainText.length ? '...' : '');
+
+      final positionPercent = plainText.isNotEmpty ? idx / plainText.length : 0.0;
+
+      results.add(GlobalSearchResult(
+        chapterIndex: i,
+        chapterTitle: title,
+        snippetBefore: before,
+        matchedText: matched,
+        snippetAfter: after,
+        positionPercent: positionPercent,
+      ));
+
+      searchFrom = idx + query.length;
+    }
+  }
+
+  return results;
+}
 
 class ReaderNotifier extends ChangeNotifier {
   final EpubService _epubService;
@@ -252,6 +324,22 @@ class ReaderNotifier extends ChangeNotifier {
     _autoHideTimer = Timer(_autoHideDuration, () {
       _showUI = false;
       notifyListeners();
+    });
+  }
+
+  /// Search all chapters for a query string, returning results with snippets.
+  /// Runs off the main thread via compute().
+  Future<List<GlobalSearchResult>> searchAllChapters(String query) async {
+    if (query.isEmpty || _currentBook?.Chapters == null) return [];
+
+    final chapters = _currentBook!.Chapters!.map((ch) => {
+      'html': ch.HtmlContent ?? '',
+      'title': ch.Title ?? '',
+    }).toList();
+
+    return compute(_searchChaptersIsolate, {
+      'query': query,
+      'chapters': chapters,
     });
   }
 

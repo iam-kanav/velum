@@ -15,6 +15,7 @@ import 'package:velum/features/tts/presentation/providers/tts_notifier.dart';
 import 'package:velum/features/tts/data/models/tts_settings.dart';
 import 'package:velum/features/tts/data/services/velum_audio_handler.dart';
 import 'package:velum/core/widgets/banner_ad_widget.dart';
+import 'package:velum/core/providers/ad_notifier.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/models/highlight.dart';
 import '../providers/highlight_notifier.dart';
@@ -48,13 +49,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   String? _cachedFontPath;
   String? _cachedFontBase64;
 
-  // In-chapter search
+  // Global search
   bool _showSearch = false;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   Timer? _searchDebounce;
-  int _searchMatchCount = 0;
-  int _searchCurrentIndex = -1;
+  List<GlobalSearchResult> _searchResults = [];
+  bool _isSearching = false;
+  double? _pendingScrollPercent;
 
   // Page turn animation
   late AnimationController _pageAnimController;
@@ -172,6 +174,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _onTtsStateChanged() {
     if (_ttsNotifier != null) {
       _updateTtsHighlight(_ttsNotifier!);
+      // Reset ad-free inactivity timer when audio is playing
+      if (_ttsNotifier!.isPlaying) {
+        context.read<AdNotifier>().onAudioPlaying();
+      }
     }
   }
 
@@ -234,141 +240,282 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _closeSearch() {
     _searchDebounce?.cancel();
     _searchController.clear();
-    _controller.runJavaScript('if(window.searchClear) window.searchClear();');
     setState(() {
       _showSearch = false;
-      _searchMatchCount = 0;
-      _searchCurrentIndex = -1;
+      _searchResults = [];
+      _isSearching = false;
     });
   }
 
   void _onSearchChanged(String value) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 300), () {
+    if (value.trim().isEmpty) {
+      setState(() {
+        _searchResults = [];
+        _isSearching = false;
+      });
+      return;
+    }
+    setState(() => _isSearching = true);
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () async {
       if (!mounted) return;
-      final escaped = value.replaceAll('\\', '\\\\').replaceAll("'", "\\'");
-      _controller.runJavaScript(
-        "if(window.searchFind) window.searchFind('$escaped');",
-      );
+      final notifier = context.read<ReaderNotifier>();
+      final results = await notifier.searchAllChapters(value.trim());
+      if (!mounted) return;
+      setState(() {
+        _searchResults = results;
+        _isSearching = false;
+      });
     });
   }
 
-  Widget _buildSearchBar(ReaderTheme readerTheme) {
+  Widget _buildGlobalSearchOverlay(ReaderTheme readerTheme) {
     final Color bg;
-    final Color border;
+    final Color divider;
     switch (readerTheme) {
       case ReaderTheme.dark:
         bg = const Color(0xFF2A2A2A);
-        border = Colors.white.withAlpha(25);
+        divider = Colors.white.withAlpha(20);
       case ReaderTheme.sepia:
         bg = const Color(0xFFEDE4D3);
-        border = Colors.brown.withAlpha(30);
+        divider = Colors.brown.withAlpha(25);
       case ReaderTheme.light:
         bg = Colors.white;
-        border = Colors.black.withAlpha(15);
+        divider = Colors.black.withAlpha(15);
     }
 
+    final matchCountText = _searchResults.length >= 100
+        ? '100+ matches'
+        : '${_searchResults.length} match${_searchResults.length == 1 ? '' : 'es'}';
+
     return Material(
-      elevation: 6,
-      borderRadius: BorderRadius.circular(28),
+      elevation: 12,
+      borderRadius: BorderRadius.circular(12),
       color: bg,
-      child: Container(
-        height: 48,
-        padding: const EdgeInsets.symmetric(horizontal: 6),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: border),
-        ),
-        child: Row(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
-            // Close button
-            IconButton(
-              icon: Icon(
-                Icons.arrow_back,
-                size: 20,
-                color: readerTheme.textColor,
+            // Header: search field + close
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 4, top: 4, bottom: 4),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _searchController,
+                      focusNode: _searchFocusNode,
+                      onChanged: _onSearchChanged,
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: readerTheme.textColor,
+                      ),
+                      decoration: InputDecoration(
+                        hintText: 'Search book...',
+                        hintStyle: TextStyle(
+                          fontSize: 16,
+                          color: readerTheme.textColor.withAlpha(100),
+                        ),
+                        border: InputBorder.none,
+                        isDense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.close,
+                      size: 20,
+                      color: readerTheme.textColor.withAlpha(180),
+                    ),
+                    onPressed: _closeSearch,
+                  ),
+                ],
               ),
-              onPressed: _closeSearch,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
             ),
-            // Text field
+            Divider(height: 1, color: divider),
+            // Match count / status row
+            if (_searchController.text.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  border: Border(bottom: BorderSide(color: divider)),
+                ),
+                child: _isSearching
+                    ? Row(
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: readerTheme.textColor.withAlpha(120),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Searching...',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: readerTheme.textColor.withAlpha(120),
+                            ),
+                          ),
+                        ],
+                      )
+                    : Text(
+                        matchCountText,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: readerTheme.textColor.withAlpha(120),
+                        ),
+                      ),
+              ),
+            // Results list
             Expanded(
-              child: TextField(
-                controller: _searchController,
-                focusNode: _searchFocusNode,
-                onChanged: _onSearchChanged,
-                style: TextStyle(fontSize: 14, color: readerTheme.textColor),
-                decoration: InputDecoration(
-                  hintText: 'Find...',
-                  hintStyle: TextStyle(
-                    fontSize: 14,
-                    color: readerTheme.textColor.withAlpha(100),
-                  ),
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
-                ),
-              ),
-            ),
-            // Match count
-            if (_searchMatchCount > 0)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  '${_searchCurrentIndex + 1}/$_searchMatchCount',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: readerTheme.textColor.withAlpha(150),
-                  ),
-                ),
-              )
-            else if (_searchController.text.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  '0',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: readerTheme.textColor.withAlpha(150),
-                  ),
-                ),
-              ),
-            // Prev / Next
-            IconButton(
-              icon: Icon(
-                Icons.keyboard_arrow_up,
-                size: 20,
-                color: readerTheme.textColor.withAlpha(
-                  _searchMatchCount > 0 ? 255 : 60,
-                ),
-              ),
-              onPressed: _searchMatchCount > 0
-                  ? () => _controller.runJavaScript(
-                      'if(window.searchPrev) window.searchPrev();',
-                    )
-                  : null,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
-            ),
-            IconButton(
-              icon: Icon(
-                Icons.keyboard_arrow_down,
-                size: 20,
-                color: readerTheme.textColor.withAlpha(
-                  _searchMatchCount > 0 ? 255 : 60,
-                ),
-              ),
-              onPressed: _searchMatchCount > 0
-                  ? () => _controller.runJavaScript(
-                      'if(window.searchNext) window.searchNext();',
-                    )
-                  : null,
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 36),
+              child: _searchResults.isEmpty
+                  ? (_searchController.text.isEmpty
+                      ? const SizedBox.shrink()
+                      : const SizedBox.shrink())
+                  : ListView.separated(
+                      padding: EdgeInsets.zero,
+                      itemCount: _searchResults.length,
+                      separatorBuilder: (_, __) =>
+                          Divider(height: 1, color: divider),
+                      itemBuilder: (context, index) {
+                        final result = _searchResults[index];
+                        return InkWell(
+                          onTap: () => _onSearchResultTap(result),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 10,
+                            ),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: RichText(
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    text: TextSpan(
+                                      style: TextStyle(
+                                        fontSize: 14,
+                                        color: readerTheme.textColor
+                                            .withAlpha(200),
+                                        height: 1.4,
+                                      ),
+                                      children: [
+                                        TextSpan(text: result.snippetBefore),
+                                        TextSpan(
+                                          text: result.matchedText,
+                                          style: const TextStyle(
+                                            color: _accentGreen,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                        TextSpan(text: result.snippetAfter),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Text(
+                                  '${result.chapterIndex + 1}: ${(result.positionPercent * 100).round()}%',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w500,
+                                    color: readerTheme.textColor.withAlpha(160),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  void _onSearchResultTap(GlobalSearchResult result) {
+    final notifier = context.read<ReaderNotifier>();
+    final chapters = notifier.currentBook?.Chapters;
+    if (chapters == null) return;
+
+    _closeSearch();
+
+    final sameChapter = result.chapterIndex == notifier.currentChapterIndex;
+    if (sameChapter) {
+      // Scroll to position in current chapter
+      _controller.runJavaScript(
+        'window.scrollTo(0, document.body.scrollHeight * ${result.positionPercent});',
+      );
+    } else {
+      // Jump to the target chapter, scroll after it loads
+      _pendingScrollPercent = result.positionPercent;
+      if (result.chapterIndex < chapters.length) {
+        notifier.jumpToChapter(chapters[result.chapterIndex]);
+      }
+    }
+  }
+
+  void _showRemoveAdsDialog(ReaderTheme readerTheme) {
+    final adNotifier = context.read<AdNotifier>();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: readerTheme.backgroundColor,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          'Support the Developer',
+          style: TextStyle(
+            color: readerTheme.textColor,
+            fontSize: 18,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Text(
+          'Watch a short ad to hide banner ads for this session. '
+          'This helps support me as an independent developer and keeps Velum free!',
+          style: TextStyle(
+            color: readerTheme.textColor.withAlpha(180),
+            fontSize: 14,
+            height: 1.5,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: Text(
+              'Not now',
+              style: TextStyle(color: readerTheme.textColor.withAlpha(120)),
+            ),
+          ),
+          FilledButton.icon(
+            onPressed: adNotifier.isRewardedAdReady
+                ? () async {
+                    Navigator.of(ctx).pop();
+                    await adNotifier.showRewardedAd();
+                  }
+                : null,
+            style: FilledButton.styleFrom(
+              backgroundColor: _accentGreen,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            icon: const Icon(Icons.play_circle_outline, size: 18),
+            label: Text(
+              adNotifier.isRewardedAdReady ? 'Watch Ad' : 'Loading...',
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -431,21 +578,6 @@ class _ReaderScreenState extends State<ReaderScreen>
               if (message.message.startsWith('scroll:')) {
                 _savedScrollPosition =
                     double.tryParse(message.message.substring(7)) ?? 0;
-              }
-              // Handle search result count
-              else if (message.message.startsWith('search-results:')) {
-                final count = int.tryParse(message.message.substring(15)) ?? 0;
-                setState(() {
-                  _searchMatchCount = count;
-                  _searchCurrentIndex = count > 0 ? 0 : -1;
-                });
-              }
-              // Handle search index navigation
-              else if (message.message.startsWith('search-index:')) {
-                final idx = int.tryParse(message.message.substring(13)) ?? -1;
-                setState(() {
-                  _searchCurrentIndex = idx;
-                });
               }
               // Handle text selection for highlighting
               else if (message.message.startsWith('selection:')) {
@@ -521,6 +653,16 @@ class _ReaderScreenState extends State<ReaderScreen>
               // Small delay to let restoreHighlights finish rendering
               Future.delayed(const Duration(milliseconds: 300), () {
                 _controller.runJavaScript("window.scrollToHighlight('$hlId');");
+              });
+            }
+            // Scroll to position from global search result
+            if (_pendingScrollPercent != null) {
+              final pct = _pendingScrollPercent!;
+              _pendingScrollPercent = null;
+              Future.delayed(const Duration(milliseconds: 300), () {
+                _controller.runJavaScript(
+                  'window.scrollTo(0, document.body.scrollHeight * $pct);',
+                );
               });
             }
           },
@@ -1045,17 +1187,55 @@ class _ReaderScreenState extends State<ReaderScreen>
                   ],
                 ),
               ),
-              const BannerAdWidget(),
+              Consumer<AdNotifier>(
+                builder: (context, adNotifier, _) {
+                  if (!adNotifier.showBanner) return const SizedBox.shrink();
+                  return Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      GestureDetector(
+                        onTap: () => _showRemoveAdsDialog(readerTheme),
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 6, bottom: 4),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.favorite_border,
+                                size: 14,
+                                color: readerTheme.textColor.withAlpha(100),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Hide ads for this session',
+                                style: TextStyle(
+                                  fontSize: 12.5,
+                                  color: readerTheme.textColor.withAlpha(100),
+                                  decoration: TextDecoration.underline,
+                                  decorationColor:
+                                      readerTheme.textColor.withAlpha(60),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const BannerAdWidget(),
+                    ],
+                  );
+                },
+              ),
             ],
           ),
 
-          // Search overlay
+          // Global search popup
           if (_showSearch)
             Positioned(
-              top: MediaQuery.of(context).padding.top + kToolbarHeight + 8,
-              left: 24,
-              right: 24,
-              child: _buildSearchBar(readerTheme),
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 16,
+              right: 16,
+              bottom: MediaQuery.of(context).padding.bottom + 60,
+              child: _buildGlobalSearchOverlay(readerTheme),
             ),
 
           // Color picker overlay for highlighting
@@ -1479,12 +1659,6 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (contentSame && settingsSame) {
       // Nothing changed - don't reload (prevents glitch on UI toggle)
       return;
-    }
-
-    // Clear search state when content changes (DOM is about to be replaced)
-    if (!contentSame) {
-      _searchMatchCount = 0;
-      _searchCurrentIndex = -1;
     }
 
     // If same chapter content but settings changed - preserve scroll

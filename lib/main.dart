@@ -19,6 +19,7 @@ import 'features/tts/data/services/velum_audio_handler.dart';
 
 import 'features/tts/presentation/providers/tts_notifier.dart';
 import 'core/services/ad_service.dart';
+import 'core/providers/ad_notifier.dart';
 
 late VelumAudioHandler audioHandler;
 
@@ -26,7 +27,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Ads
-  // await AdService().initialize();
+  await AdService().initialize();
 
   // Initialize SharedPreferences
   final prefs = await SharedPreferences.getInstance();
@@ -94,6 +95,7 @@ class MainApp extends StatelessWidget {
         ChangeNotifierProvider(
           create: (context) => HighlightNotifier(context.read<HighlightService>()),
         ),
+        ChangeNotifierProvider(create: (_) => AdNotifier()),
         Provider<VelumAudioHandler>.value(value: audioHandler),
         ChangeNotifierProvider(
           create: (context) {

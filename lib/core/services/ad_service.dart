@@ -23,7 +23,24 @@ class AdService {
     if (Platform.isAndroid) {
       return 'ca-app-pub-1274598295446847/3374869571'; // PRODUCTION ID
     } else if (Platform.isIOS) {
-      return 'ca-app-pub-1274598295446847/3374869571'; // Keeping same ID for iOS if user intended cross-platform or separate. Based on request, using provided ID.
+      return 'ca-app-pub-1274598295446847/3374869571';
+    }
+    throw UnsupportedError('Unsupported platform');
+  }
+
+  String get rewardedAdUnitId {
+    if (kDebugMode) {
+      if (Platform.isAndroid) {
+        return 'ca-app-pub-3940256099942544/5224354917'; // Test Android Rewarded
+      } else if (Platform.isIOS) {
+        return 'ca-app-pub-3940256099942544/1712485313'; // Test iOS Rewarded
+      }
+    }
+
+    if (Platform.isAndroid) {
+      return 'ca-app-pub-1274598295446847/5686172298';
+    } else if (Platform.isIOS) {
+      return 'ca-app-pub-1274598295446847/5686172298';
     }
     throw UnsupportedError('Unsupported platform');
   }

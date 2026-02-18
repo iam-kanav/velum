@@ -200,11 +200,10 @@ class TtsNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Stop playback and reset position
+  /// Stop playback (preserves position so resume picks up where we left off)
   Future<void> stop() async {
     await _ttsService.stop();
     _state = TtsState.stopped;
-    _currentChunkIndex = 0;
     notifyListeners();
   }
 

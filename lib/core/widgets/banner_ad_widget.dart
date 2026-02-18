@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'package:provider/provider.dart';
 import '../services/ad_service.dart';
+import '../providers/ad_notifier.dart';
 
 class BannerAdWidget extends StatefulWidget {
   const BannerAdWidget({super.key});
@@ -16,7 +18,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
   @override
   void initState() {
     super.initState();
-    // _loadAd();
+    _loadAd();
   }
 
   void _loadAd() {
@@ -39,19 +41,16 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
 
   @override
   Widget build(BuildContext context) {
-    if (_isLoaded && _bannerAd != null) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 16.0),
-        child: SizedBox(
-          width: _bannerAd!.size.width.toDouble(),
-          height: _bannerAd!.size.height.toDouble(),
-          child: AdWidget(ad: _bannerAd!),
-        ),
-      );
+    final adNotifier = context.watch<AdNotifier>();
+
+    if (!adNotifier.showBanner || !_isLoaded || _bannerAd == null) {
+      return const SizedBox.shrink();
     }
-    // Return empty space if not loaded, or could return nothing.
-    // Returning shrink to avoid layout shifts if possible, or placeholder.
-    // For now, shrinking to hide until loaded.
-    return const SizedBox.shrink();
+
+    return SizedBox(
+      width: _bannerAd!.size.width.toDouble(),
+      height: _bannerAd!.size.height.toDouble(),
+      child: AdWidget(ad: _bannerAd!),
+    );
   }
 }
