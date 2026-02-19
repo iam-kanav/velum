@@ -1,78 +1,91 @@
-# Velum - EPUB Reader with Text-to-Speech
+# Velum
 
-Velum is a beautiful, feature-rich EPUB reader for Android and iOS with built-in Text-to-Speech, customizable themes, and a distraction-free reading experience.
+**A beautiful, distraction-free EPUB reader with built-in Text-to-Speech for Android.**
+
+<p align="center">
+  <img src="Mockup Screenshots/Light/light_library.png" width="30%" alt="Library – Light" />
+  <img src="Mockup Screenshots/Light/light_reader.png" width="30%" alt="Reader – Light" />
+  <img src="Mockup Screenshots/Light/light_tts_settings.png" width="30%" alt="TTS Settings – Light" />
+</p>
+
+---
+
+## Themes
+
+Velum ships with three themes — **Light**, **Dark**, and **Sepia** — each applied independently to the library UI and the reading view.
+
+<p align="center">
+  <img src="Mockup Screenshots/Light/light_reader.png" width="22%" alt="Light theme" />
+  <img src="Mockup Screenshots/Dark/dark_reader.png" width="22%" alt="Dark theme" />
+  <img src="Mockup Screenshots/Sepia/sepia_reader.png" width="22%" alt="Sepia theme" />
+</p>
 
 ---
 
 ## Library
 
-- **Import books** manually via file picker or auto-detect EPUBs on your device
-- **Search** your library in real time by title or author
-- **Sort** by recently read or alphabetically
-- **Pin** favourite books to the top of your library
-- **Multi-select** books for bulk management (delete, pin/unpin)
-- **Reading progress** saved automatically per book (chapter + scroll position)
+<p align="center">
+  <img src="Mockup Screenshots/Light/light_library.png" width="28%" alt="Library – Light" />
+  <img src="Mockup Screenshots/Dark/dark_library.png" width="28%" alt="Library – Dark" />
+  <img src="Mockup Screenshots/Sepia/sepia_library.png" width="28%" alt="Library – Sepia" />
+</p>
+
+- Auto-detect all EPUB files on your device, or import them manually
+- Search your library in real time by title or author
+- Sort by recently read or alphabetically
+- Pin favourites to the top
+- Multi-select for bulk delete or pin/unpin
+- Reading progress (chapter + scroll position) saved automatically per book
+
+---
 
 ## Reader
 
-- **WebView-based rendering** with full HTML/CSS support, images, and links
-- **Three themes** — Light, Dark, and Sepia — for the reader, independent of the app theme
-- **Typography controls** — choose from Serif (Merriweather), Sans-Serif (Inter), Monospace (Roboto Mono), or import your own TTF fonts
-- **Adjustable font size** (12–32 px) and **line height** (1.0–2.5)
-- **Swipe navigation** — swipe left/right to move between chapters with smooth slide animations
-- **Tap to toggle UI** — single tap shows/hides the top and bottom bars; they auto-hide after a few seconds
-- **Scroll position persistence** — Velum remembers where you left off in every book
+<p align="center">
+  <img src="Mockup Screenshots/Light/light_reader.png" width="28%" alt="Reader – Light" />
+  <img src="Mockup Screenshots/Dark/dark_reader.png" width="28%" alt="Reader – Dark" />
+  <img src="Mockup Screenshots/Sepia/sepia_reader.png" width="28%" alt="Reader – Sepia" />
+</p>
 
-## Global Search
+- Full HTML/CSS rendering with image and link support
+- Swipe left/right to move between chapters with smooth slide animations
+- Tap anywhere to show/hide the UI — bars auto-hide after a few seconds
+- Select text and highlight in **five colours** (yellow, green, blue, pink, orange)
+- Highlights panel lets you browse, navigate to, and delete any highlight
+- Global search across all chapters with snippet previews and chapter/position info
+- Scroll position restored exactly where you left off
 
-- **Search across all chapters** at once from the reader
-- Results appear in a floating popup with match snippets, chapter numbers, and position percentages
-- Matched text highlighted in green for easy scanning
-- Tap any result to jump directly to that chapter and position
-- Search runs off the main thread for smooth performance
+---
 
 ## Text-to-Speech
 
-- **Play/Pause** with a floating action button in the reader
-- **50+ languages** and multiple voices per language
-- **Adjustable speed** (0.2×–2.0×), **pitch**, and **volume**
-- **Highlight modes** — sentence-level or paragraph-level visual tracking that follows along as the book is read aloud
-- **Double-tap** any paragraph or sentence to jump TTS playback to that point
-- **Auto-continue** to the next chapter when the current one finishes
-- **Background playback** with media notification controls (play, pause, skip forward/back)
-- **Audio focus** — optionally pause when other audio starts playing
+<p align="center">
+  <img src="Mockup Screenshots/Light/light_tts_settings.png" width="28%" alt="TTS Settings – Light" />
+  <img src="Mockup Screenshots/Dark/dark_tts_settings.png" width="28%" alt="TTS Settings – Dark" />
+  <img src="Mockup Screenshots/Sepia/sepia_tts_settings.png" width="28%" alt="TTS Settings – Sepia" />
+</p>
 
-## Highlights
+- Play/Pause floating button in the reader
+- 50+ languages with multiple voices per language
+- Adjustable speed (0.2×–2.0×), pitch, and volume
+- **Sentence-level or paragraph-level highlighting** that scrolls to follow along
+- Double-tap any paragraph to jump TTS playback to that point
+- Auto-advance to the next chapter when the current one finishes
+- Background playback with lock-screen / notification controls
+- Optionally pause when another app takes audio focus
 
-- **Select text and highlight** in one of five colours — yellow, green, blue, pink, or orange
-- **Highlights panel** shows all your highlights grouped by colour with chapter references
-- Tap a highlight to **navigate** directly to it, even across chapters
-- Delete individual highlights at any time
-- Highlights are **restored automatically** every time a chapter loads
+---
 
 ## Settings
 
-- **App theme** (Light, Dark, Sepia) — controls the library and settings UI
-- **Reader theme** — independent from the app theme, controls only the reading view
-- **Font selection** with live preview, including custom font import
-- **Font size and line height sliders** with real-time preview
-- **In-reader settings modal** with two tabs — TTS and Reader — accessible without leaving your book
+<p align="center">
+  <img src="Mockup Screenshots/Light/light_reader_settings.png" width="28%" alt="Reader Settings – Light" />
+  <img src="Mockup Screenshots/Dark/darj_reader_settings.png" width="28%" alt="Reader Settings – Dark" />
+  <img src="Mockup Screenshots/Sepia/sepia_reader_settings.png" width="28%" alt="Reader Settings – Sepia" />
+</p>
+
+- Independent app theme and reader theme
+- Font selection: Serif, Sans-Serif, Monospace, or **import your own TTF**
+- Font size (12–32 px) and line height (1.0–2.5) with live preview
+- In-reader settings modal (TTS + Reader tabs) — no need to leave your book
 - All settings persist across sessions
-
-## Onboarding
-
-- Guided **four-step onboarding** on first launch:
-  1. Welcome and feature overview
-  2. Library setup (auto-detect or manual import)
-  3. Notification permission for background TTS controls
-  4. Theme selection for app and reader
-
-## Book Completion
-
-- A **celebration screen** when you finish the last chapter, with options to go back to the library, start over, or stay on the last page
-
-## Ads
-
-- A small **banner ad** at the bottom of the reader
-- **Watch a short rewarded ad** to hide the banner for your entire reading session — a small way to support independent development
-- The ad-free session stays active as long as you're using the app or listening to TTS; it resets after 30 minutes of inactivity or when the app is closed
