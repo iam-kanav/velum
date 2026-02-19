@@ -76,7 +76,7 @@ Velum ships with three themes — **Light**, **Dark**, and **Sepia** — each ap
 
 ---
 
-## Settings
+## Reader Settings
 
 <p align="center">
   <img src="Mockup Screenshots/Light/light_reader_settings.png" width="28%" alt="Reader Settings – Light" />
