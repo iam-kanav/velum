@@ -15,9 +15,9 @@
 Velum ships with three themes — **Light**, **Dark**, and **Sepia** — each applied independently to the library UI and the reading view.
 
 <p align="center">
-  <img src="Mockup Screenshots/Light/light_reader.png" width="22%" alt="Light theme" />
-  <img src="Mockup Screenshots/Dark/dark_reader.png" width="22%" alt="Dark theme" />
-  <img src="Mockup Screenshots/Sepia/sepia_reader.png" width="22%" alt="Sepia theme" />
+  <img src="Mockup Screenshots/Light/light_reader.png" width="28%" alt="Light theme" />
+  <img src="Mockup Screenshots/Dark/dark_reader.png" width="28%" alt="Dark theme" />
+  <img src="Mockup Screenshots/Sepia/sepia_reader.png" width="28%" alt="Sepia theme" />
 </p>
 
 ---
