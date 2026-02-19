@@ -4,8 +4,8 @@
 
 <p align="center">
   <img src="Mockup Screenshots/Light/light_library.png" width="30%" alt="Library – Light" />
-  <img src="Mockup Screenshots/Light/light_reader.png" width="30%" alt="Reader – Light" />
-  <img src="Mockup Screenshots/Light/light_tts_settings.png" width="30%" alt="TTS Settings – Light" />
+  <img src="Mockup Screenshots/Dark/dark_reader.png" width="30%" alt="Reader – Light" />
+  <img src="Mockup Screenshots/Sepia/sepia_tts_settings.png" width="30%" alt="TTS Settings – Light" />
 </p>
 
 ---
