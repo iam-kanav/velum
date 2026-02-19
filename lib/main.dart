@@ -27,7 +27,7 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize Ads
-  await AdService().initialize();
+  // await AdService().initialize();
 
   // Initialize SharedPreferences
   final prefs = await SharedPreferences.getInstance();
@@ -93,7 +93,8 @@ class MainApp extends StatelessWidget {
           create: (context) => LibraryNotifier(context.read<LibraryService>()),
         ),
         ChangeNotifierProvider(
-          create: (context) => HighlightNotifier(context.read<HighlightService>()),
+          create: (context) =>
+              HighlightNotifier(context.read<HighlightService>()),
         ),
         ChangeNotifierProvider(create: (_) => AdNotifier()),
         Provider<VelumAudioHandler>.value(value: audioHandler),

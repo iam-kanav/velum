@@ -62,6 +62,7 @@ class LibraryService {
   static const String _booksKey = 'scanned_books';
   static const String _onboardingCompleteKey = 'onboarding_complete';
   static const String _autoScanEnabledKey = 'auto_scan_enabled';
+  static const String _deletedPathsKey = 'deleted_book_paths';
 
   final SharedPreferences _prefs;
 
@@ -120,6 +121,7 @@ class LibraryService {
     final List<ScannedBook> foundBooks = [];
     final existingBooks = getSavedBooks();
     final existingPaths = existingBooks.map((b) => b.filePath).toSet();
+    final deletedPaths = _getDeletedPaths();
 
     try {
       // Common Android storage root
@@ -143,6 +145,7 @@ class LibraryService {
         rootDir,
         foundBooks,
         existingPaths,
+        deletedPaths,
         skipDirs,
         onProgress,
       );
@@ -166,6 +169,7 @@ class LibraryService {
     Directory dir,
     List<ScannedBook> foundBooks,
     Set<String> existingPaths,
+    Set<String> deletedPaths,
     Set<String> skipDirs,
     void Function(int count)? onProgress,
   ) async {
@@ -180,13 +184,15 @@ class LibraryService {
             entity,
             foundBooks,
             existingPaths,
+            deletedPaths,
             skipDirs,
             onProgress,
           );
         } else if (entity is File &&
             entity.path.toLowerCase().endsWith('.epub')) {
-          // Skip if already in library
+          // Skip if already in library or explicitly deleted by the user
           if (existingPaths.contains(entity.path)) continue;
+          if (deletedPaths.contains(entity.path)) continue;
 
           try {
             final bytes = await entity.readAsBytes();
@@ -315,6 +321,23 @@ class LibraryService {
     final books = getSavedBooks();
     books.removeWhere((b) => b.filePath == filePath);
     await _saveBooks(books);
+    // Remember this path so the scanner never re-adds it
+    await _addToDeletedPaths(filePath);
+  }
+
+  Set<String> _getDeletedPaths() {
+    final json = _prefs.getString(_deletedPathsKey);
+    if (json == null) return {};
+    try {
+      return Set<String>.from(jsonDecode(json) as List);
+    } catch (_) {
+      return {};
+    }
+  }
+
+  Future<void> _addToDeletedPaths(String filePath) async {
+    final paths = _getDeletedPaths()..add(filePath);
+    await _prefs.setString(_deletedPathsKey, jsonEncode(paths.toList()));
   }
 
   Future<void> clearBooks() async {
