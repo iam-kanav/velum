@@ -12,15 +12,12 @@ import 'features/settings/data/models/reader_settings.dart';
 import 'features/settings/presentation/providers/settings_notifier.dart';
 import 'features/reader/data/services/epub_service.dart';
 import 'features/reader/data/services/highlight_service.dart';
-import 'features/reader/presentation/providers/reader_notifier.dart';
-import 'features/reader/presentation/providers/highlight_notifier.dart';
 import 'features/library/data/models/scanned_book.dart';
 import 'features/library/data/services/library_service.dart';
 import 'features/library/presentation/providers/library_notifier.dart';
 import 'features/tts/data/services/tts_service.dart';
 import 'features/tts/data/services/velum_audio_handler.dart';
 
-import 'features/tts/presentation/providers/tts_notifier.dart';
 import 'core/providers/ad_notifier.dart';
 
 late VelumAudioHandler audioHandler;
@@ -95,30 +92,10 @@ class MainApp extends StatelessWidget {
               SettingsNotifier(context.read<SharedPreferences>()),
         ),
         ChangeNotifierProvider(
-          create: (context) => ReaderNotifier(
-            context.read<EpubService>(),
-            context.read<LibraryService>(),
-          ),
-        ),
-        ChangeNotifierProvider(
           create: (context) => LibraryNotifier(context.read<LibraryService>()),
-        ),
-        ChangeNotifierProvider(
-          create: (context) =>
-              HighlightNotifier(context.read<HighlightService>()),
         ),
         ChangeNotifierProvider(create: (_) => AdNotifier()),
         Provider<VelumAudioHandler>.value(value: audioHandler),
-        ChangeNotifierProvider(
-          create: (context) {
-            final ttsNotifier = TtsNotifier(
-              context.read<TtsService>(),
-              context.read<SharedPreferences>(),
-            )..init();
-            audioHandler.attachNotifier(ttsNotifier);
-            return ttsNotifier;
-          },
-        ),
       ],
       child: const VelumApp(),
     );
