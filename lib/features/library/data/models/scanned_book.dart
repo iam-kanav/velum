@@ -1,14 +1,35 @@
 import 'package:equatable/equatable.dart';
+import 'package:hive/hive.dart';
 
+part 'scanned_book.g.dart';
+
+@HiveType(typeId: 0)
 class ScannedBook extends Equatable {
+  @HiveField(0)
   final String filePath;
+
+  @HiveField(1)
   final String title;
+
+  @HiveField(2)
   final String author;
+
+  @HiveField(3)
   final DateTime? addedAt;
+
+  @HiveField(4)
   final String? coverBase64; // Base64 encoded cover image
+
+  @HiveField(5)
   final bool isPinned;
+
+  @HiveField(6)
   final DateTime? lastReadTime;
+
+  @HiveField(7)
   final int? lastReadChapter;
+
+  @HiveField(8)
   final double? lastReadPosition;
 
   const ScannedBook({

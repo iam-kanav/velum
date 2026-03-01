@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:hive/hive.dart';
 import 'package:epubx/epubx.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../models/scanned_book.dart';
@@ -10,7 +11,8 @@ import '../models/scanned_book.dart';
 /// Top-level function for compute() — parses EPUB bytes in a background isolate.
 /// Must be top-level (not a method) so Dart can send it to the isolate.
 Future<ScannedBook> _parseEpubInIsolate(
-    (Uint8List bytes, String fileName, String filePath) params) async {
+  (Uint8List bytes, String fileName, String filePath) params,
+) async {
   final (bytes, fileName, filePath) = params;
   try {
     final epubBook = await EpubReader.readBook(bytes);
@@ -65,11 +67,9 @@ class LibraryService {
   static const String _deletedPathsKey = 'deleted_book_paths';
 
   final SharedPreferences _prefs;
+  final Box<ScannedBook> _booksBox;
 
-  // In-memory cache to avoid repeated JSON deserialization from SharedPreferences
-  List<ScannedBook>? _cachedBooks;
-
-  LibraryService(this._prefs);
+  LibraryService(this._prefs, this._booksBox);
 
   // ════════════════════════════════════════════════════════════════════════════
   // ONBOARDING
@@ -109,6 +109,35 @@ class LibraryService {
       return status.isGranted;
     }
     return true;
+  }
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // MIGRATION
+  // ════════════════════════════════════════════════════════════════════════════
+
+  /// Migrates existing books from SharedPreferences to Hive once
+  Future<void> migrateFromSharedPreferencesIfNeeded() async {
+    final legacyJson = _prefs.getString(_booksKey);
+    if (legacyJson != null) {
+      try {
+        debugPrint('Migrating books from SharedPreferences to Hive...');
+        final jsonList = jsonDecode(legacyJson) as List;
+        final legacyBooks = jsonList
+            .map((json) => ScannedBook.fromJson(json as Map<String, dynamic>))
+            .toList();
+
+        final Map<String, ScannedBook> booksMap = {};
+        for (final book in legacyBooks) {
+          booksMap[book.filePath] = book;
+        }
+
+        await _booksBox.putAll(booksMap);
+        await _prefs.remove(_booksKey);
+        debugPrint('Migration complete. Removed legacy data.');
+      } catch (e) {
+        debugPrint('Error migrating from SharedPreferences: $e');
+      }
+    }
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -153,16 +182,19 @@ class LibraryService {
       debugPrint('Error scanning device: $e');
     }
 
-    // Merge with existing books
-    final allBooks = List<ScannedBook>.from(existingBooks);
+    // Prepare batch update for Hive
+    final newBooksMap = <String, ScannedBook>{};
     for (final book in foundBooks) {
-      if (!allBooks.any((b) => b.filePath == book.filePath)) {
-        allBooks.add(book);
+      if (!existingPaths.contains(book.filePath)) {
+        newBooksMap[book.filePath] = book;
       }
     }
 
-    await _saveBooks(allBooks);
-    return allBooks;
+    if (newBooksMap.isNotEmpty) {
+      await _booksBox.putAll(newBooksMap);
+    }
+
+    return getSavedBooks();
   }
 
   Future<void> _scanDirectory(
@@ -197,10 +229,11 @@ class LibraryService {
           try {
             final bytes = await entity.readAsBytes();
             final fileName = entity.path.split('/').last;
-            final book = await compute(
-              _parseEpubInIsolate,
-              (bytes, fileName, entity.path),
-            );
+            final book = await compute(_parseEpubInIsolate, (
+              bytes,
+              fileName,
+              entity.path,
+            ));
             foundBooks.add(book);
             onProgress?.call(foundBooks.length);
           } catch (e) {
@@ -245,10 +278,11 @@ class LibraryService {
       for (final file in result.files) {
         if (file.bytes != null) {
           try {
-            final book = await compute(
-              _parseEpubInIsolate,
-              (file.bytes!, file.name, file.path ?? file.name),
-            );
+            final book = await compute(_parseEpubInIsolate, (
+              file.bytes!,
+              file.name,
+              file.path ?? file.name,
+            ));
             newBooks.add(book);
           } catch (e) {
             debugPrint('Failed to parse ${file.name}: $e');
@@ -264,64 +298,42 @@ class LibraryService {
         }
       }
 
-      // Add new books to existing collection
-      final existingBooks = getSavedBooks();
+      final existingPaths = _booksBox.keys.cast<String>().toSet();
+      final newBooksMap = <String, ScannedBook>{};
+
       for (final book in newBooks) {
-        if (!existingBooks.any((b) => b.filePath == book.filePath)) {
-          existingBooks.add(book);
+        if (!existingPaths.contains(book.filePath)) {
+          newBooksMap[book.filePath] = book;
         }
       }
 
-      await _saveBooks(existingBooks);
-      return existingBooks;
+      if (newBooksMap.isNotEmpty) {
+        await _booksBox.putAll(newBooksMap);
+      }
+
+      return getSavedBooks();
     } catch (e) {
       debugPrint('Error picking files: $e');
       return getSavedBooks();
     }
   }
 
-
   // ════════════════════════════════════════════════════════════════════════════
   // BOOK STORAGE
   // ════════════════════════════════════════════════════════════════════════════
 
-  Future<void> _saveBooks(List<ScannedBook> books) async {
-    _cachedBooks = List.from(books);
-    final jsonList = books.map((b) => b.toJson()).toList();
-    await _prefs.setString(_booksKey, jsonEncode(jsonList));
-  }
-
   List<ScannedBook> getSavedBooks() {
-    if (_cachedBooks != null) return List.from(_cachedBooks!);
-
-    final jsonString = _prefs.getString(_booksKey);
-    if (jsonString == null) return [];
-
-    try {
-      final jsonList = jsonDecode(jsonString) as List;
-      _cachedBooks = jsonList
-          .map((json) => ScannedBook.fromJson(json as Map<String, dynamic>))
-          .toList();
-      return List.from(_cachedBooks!);
-    } catch (e) {
-      return [];
-    }
+    return _booksBox.values.toList();
   }
 
   Future<void> addBook(ScannedBook book) async {
-    final books = getSavedBooks();
-    // Avoid duplicates
-    if (!books.any((b) => b.filePath == book.filePath)) {
-      books.add(book);
-      await _saveBooks(books);
+    if (!_booksBox.containsKey(book.filePath)) {
+      await _booksBox.put(book.filePath, book);
     }
   }
 
   Future<void> removeBook(String filePath) async {
-    final books = getSavedBooks();
-    books.removeWhere((b) => b.filePath == filePath);
-    await _saveBooks(books);
-    // Remember this path so the scanner never re-adds it
+    await _booksBox.delete(filePath);
     await _addToDeletedPaths(filePath);
   }
 
@@ -341,27 +353,22 @@ class LibraryService {
   }
 
   Future<void> clearBooks() async {
-    _cachedBooks = null;
-    await _prefs.remove(_booksKey);
+    await _booksBox.clear();
   }
 
   Future<void> toggleBookPin(String filePath) async {
-    final books = getSavedBooks();
-    final index = books.indexWhere((b) => b.filePath == filePath);
-    if (index != -1) {
-      final book = books[index];
-      books[index] = book.copyWith(isPinned: !book.isPinned);
-      await _saveBooks(books);
+    final book = _booksBox.get(filePath);
+    if (book != null) {
+      final updatedBook = book.copyWith(isPinned: !book.isPinned);
+      await _booksBox.put(filePath, updatedBook);
     }
   }
 
   Future<void> updateLastReadTime(String filePath) async {
-    final books = getSavedBooks();
-    final index = books.indexWhere((b) => b.filePath == filePath);
-    if (index != -1) {
-      final book = books[index];
-      books[index] = book.copyWith(lastReadTime: DateTime.now());
-      await _saveBooks(books);
+    final book = _booksBox.get(filePath);
+    if (book != null) {
+      final updatedBook = book.copyWith(lastReadTime: DateTime.now());
+      await _booksBox.put(filePath, updatedBook);
     }
   }
 
@@ -370,16 +377,14 @@ class LibraryService {
     int chapterIndex,
     double scrollPosition,
   ) async {
-    final books = getSavedBooks();
-    final index = books.indexWhere((b) => b.filePath == filePath);
-    if (index != -1) {
-      final book = books[index];
-      books[index] = book.copyWith(
+    final book = _booksBox.get(filePath);
+    if (book != null) {
+      final updatedBook = book.copyWith(
         lastReadTime: DateTime.now(),
         lastReadChapter: chapterIndex,
         lastReadPosition: scrollPosition,
       );
-      await _saveBooks(books);
+      await _booksBox.put(filePath, updatedBook);
     }
   }
 }

@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:epubx/epubx.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 import 'package:html/parser.dart' as html_parser;
 
 import '../../data/services/epub_service.dart';
@@ -55,22 +54,28 @@ List<GlobalSearchResult> _searchChaptersIsolate(Map<String, dynamic> params) {
       final snippetStart = (idx - 30).clamp(0, plainText.length);
       final snippetEnd = (idx + query.length + 30).clamp(0, plainText.length);
 
-      final before = (snippetStart > 0 ? '...' : '') +
+      final before =
+          (snippetStart > 0 ? '...' : '') +
           plainText.substring(snippetStart, idx);
       final matched = plainText.substring(idx, idx + query.length);
-      final after = plainText.substring(idx + query.length, snippetEnd) +
+      final after =
+          plainText.substring(idx + query.length, snippetEnd) +
           (snippetEnd < plainText.length ? '...' : '');
 
-      final positionPercent = plainText.isNotEmpty ? idx / plainText.length : 0.0;
+      final positionPercent = plainText.isNotEmpty
+          ? idx / plainText.length
+          : 0.0;
 
-      results.add(GlobalSearchResult(
-        chapterIndex: i,
-        chapterTitle: title,
-        snippetBefore: before,
-        matchedText: matched,
-        snippetAfter: after,
-        positionPercent: positionPercent,
-      ));
+      results.add(
+        GlobalSearchResult(
+          chapterIndex: i,
+          chapterTitle: title,
+          snippetBefore: before,
+          matchedText: matched,
+          snippetAfter: after,
+          positionPercent: positionPercent,
+        ),
+      );
 
       searchFrom = idx + query.length;
     }
@@ -332,10 +337,9 @@ class ReaderNotifier extends ChangeNotifier {
   Future<List<GlobalSearchResult>> searchAllChapters(String query) async {
     if (query.isEmpty || _currentBook?.Chapters == null) return [];
 
-    final chapters = _currentBook!.Chapters!.map((ch) => {
-      'html': ch.HtmlContent ?? '',
-      'title': ch.Title ?? '',
-    }).toList();
+    final chapters = _currentBook!.Chapters!
+        .map((ch) => {'html': ch.HtmlContent ?? '', 'title': ch.Title ?? ''})
+        .toList();
 
     return compute(_searchChaptersIsolate, {
       'query': query,
@@ -415,9 +419,11 @@ class ReaderNotifier extends ChangeNotifier {
     final body = document.body;
     if (body == null) return '';
 
-    // Only extract from p elements (matching JS querySelectorAll('p'))
+    // Extract from block elements to avoid missing text
     final paragraphs = <String>[];
-    final pElements = body.querySelectorAll('p');
+    final pElements = body.querySelectorAll(
+      'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
+    );
 
     for (final p in pElements) {
       final text = p.text.trim();
@@ -437,7 +443,9 @@ class ReaderNotifier extends ChangeNotifier {
     final body = document.body;
     if (body == null) return htmlContent;
 
-    final pElements = body.querySelectorAll('p');
+    final pElements = body.querySelectorAll(
+      'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
+    );
     int paraIndex = 0;
 
     for (final p in pElements) {
@@ -502,10 +510,10 @@ class ReaderNotifier extends ChangeNotifier {
     final body = document.body;
     if (body == null) return htmlContent;
 
-    // Only index <p> elements — must match extractStructuredText() which
-    // uses body.querySelectorAll('p'). Using other tags (div, h1-h6, li, etc.)
-    // would shift the indices and cause TTS to read the wrong paragraph.
-    final pElements = body.querySelectorAll('p');
+    // Index block elements consistently with extractStructuredText()
+    final pElements = body.querySelectorAll(
+      'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
+    );
     int paragraphIndex = 0;
 
     for (final p in pElements) {

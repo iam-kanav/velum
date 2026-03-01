@@ -22,6 +22,7 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
   }
 
   void _loadAd() {
+    if (_bannerAd != null) return;
     _bannerAd = AdService().createBannerAd(
       onAdLoaded: () {
         if (mounted) {
@@ -30,7 +31,8 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
           });
         }
       },
-    )..load();
+    );
+    _bannerAd!.load();
   }
 
   @override

@@ -22,6 +22,12 @@ import '../providers/highlight_notifier.dart';
 import '../widgets/contents_modal.dart';
 import '../widgets/highlights_modal.dart';
 
+import 'package:flutter/services.dart' show rootBundle;
+import 'package:velum/features/reader/presentation/widgets/color_picker_bar.dart';
+import 'package:velum/features/reader/presentation/widgets/global_search_overlay.dart';
+import 'package:velum/features/reader/presentation/widgets/book_complete_overlay.dart';
+import 'package:velum/features/reader/presentation/widgets/tts_fab.dart';
+
 const Color _accentGreen = Color(0xFF4CAF50);
 
 class ReaderScreen extends StatefulWidget {
@@ -39,7 +45,6 @@ class _ReaderScreenState extends State<ReaderScreen>
   String? _lastHtmlContent;
   double _savedScrollPosition = 0;
   bool _shouldRestoreScroll = false;
-  String? _lastChapterTitle; // Track chapter changes for TTS
   String? _lastHighlightKey; // Track current TTS highlight position
   bool _isPageReady = false; // Track if JS is injected and ready
   bool _showTutorial = false; // First-time tutorial overlay
@@ -54,8 +59,6 @@ class _ReaderScreenState extends State<ReaderScreen>
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
   Timer? _searchDebounce;
-  List<GlobalSearchResult> _searchResults = [];
-  bool _isSearching = false;
   double? _pendingScrollPercent;
 
   // Page turn animation
@@ -242,205 +245,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     _searchController.clear();
     setState(() {
       _showSearch = false;
-      _searchResults = [];
-      _isSearching = false;
     });
   }
 
-  void _onSearchChanged(String value) {
-    _searchDebounce?.cancel();
-    if (value.trim().isEmpty) {
-      setState(() {
-        _searchResults = [];
-        _isSearching = false;
-      });
-      return;
-    }
-    setState(() => _isSearching = true);
-    _searchDebounce = Timer(const Duration(milliseconds: 300), () async {
-      if (!mounted) return;
-      final notifier = context.read<ReaderNotifier>();
-      final results = await notifier.searchAllChapters(value.trim());
-      if (!mounted) return;
-      setState(() {
-        _searchResults = results;
-        _isSearching = false;
-      });
-    });
-  }
-
-  Widget _buildGlobalSearchOverlay(ReaderTheme readerTheme) {
-    final Color bg;
-    final Color divider;
-    switch (readerTheme) {
-      case ReaderTheme.dark:
-        bg = const Color(0xFF2A2A2A);
-        divider = Colors.white.withAlpha(20);
-      case ReaderTheme.sepia:
-        bg = const Color(0xFFEDE4D3);
-        divider = Colors.brown.withAlpha(25);
-      case ReaderTheme.light:
-        bg = Colors.white;
-        divider = Colors.black.withAlpha(15);
-    }
-
-    final matchCountText = _searchResults.length >= 100
-        ? '100+ matches'
-        : '${_searchResults.length} match${_searchResults.length == 1 ? '' : 'es'}';
-
-    return Material(
-      elevation: 12,
-      borderRadius: BorderRadius.circular(12),
-      color: bg,
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Header: search field + close
-            Padding(
-              padding: const EdgeInsets.only(left: 16, right: 4, top: 4, bottom: 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      focusNode: _searchFocusNode,
-                      onChanged: _onSearchChanged,
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: readerTheme.textColor,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: 'Search book...',
-                        hintStyle: TextStyle(
-                          fontSize: 16,
-                          color: readerTheme.textColor.withAlpha(100),
-                        ),
-                        border: InputBorder.none,
-                        isDense: true,
-                        contentPadding:
-                            const EdgeInsets.symmetric(vertical: 12),
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    icon: Icon(
-                      Icons.close,
-                      size: 20,
-                      color: readerTheme.textColor.withAlpha(180),
-                    ),
-                    onPressed: _closeSearch,
-                  ),
-                ],
-              ),
-            ),
-            Divider(height: 1, color: divider),
-            // Match count / status row
-            if (_searchController.text.isNotEmpty)
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                decoration: BoxDecoration(
-                  border: Border(bottom: BorderSide(color: divider)),
-                ),
-                child: _isSearching
-                    ? Row(
-                        children: [
-                          SizedBox(
-                            width: 14,
-                            height: 14,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: readerTheme.textColor.withAlpha(120),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Searching...',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: readerTheme.textColor.withAlpha(120),
-                            ),
-                          ),
-                        ],
-                      )
-                    : Text(
-                        matchCountText,
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: readerTheme.textColor.withAlpha(120),
-                        ),
-                      ),
-              ),
-            // Results list
-            Expanded(
-              child: _searchResults.isEmpty
-                  ? (_searchController.text.isEmpty
-                      ? const SizedBox.shrink()
-                      : const SizedBox.shrink())
-                  : ListView.separated(
-                      padding: EdgeInsets.zero,
-                      itemCount: _searchResults.length,
-                      separatorBuilder: (_, __) =>
-                          Divider(height: 1, color: divider),
-                      itemBuilder: (context, index) {
-                        final result = _searchResults[index];
-                        return InkWell(
-                          onTap: () => _onSearchResultTap(result),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 10,
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: RichText(
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    text: TextSpan(
-                                      style: TextStyle(
-                                        fontSize: 14,
-                                        color: readerTheme.textColor
-                                            .withAlpha(200),
-                                        height: 1.4,
-                                      ),
-                                      children: [
-                                        TextSpan(text: result.snippetBefore),
-                                        TextSpan(
-                                          text: result.matchedText,
-                                          style: const TextStyle(
-                                            color: _accentGreen,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                        TextSpan(text: result.snippetAfter),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  '${result.chapterIndex + 1}: ${(result.positionPercent * 100).round()}%',
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500,
-                                    color: readerTheme.textColor.withAlpha(160),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  // _buildGlobalSearchOverlay removed
 
   void _onSearchResultTap(GlobalSearchResult result) {
     final notifier = context.read<ReaderNotifier>();
@@ -459,6 +267,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       // Jump to the target chapter, scroll after it loads
       _pendingScrollPercent = result.positionPercent;
       if (result.chapterIndex < chapters.length) {
+        context.read<TtsNotifier>().stop();
+        context.read<TtsNotifier>().clearContent();
         notifier.jumpToChapter(chapters[result.chapterIndex]);
       }
     }
@@ -566,12 +376,16 @@ class _ReaderScreenState extends State<ReaderScreen>
                 // Already on the last chapter — show completion screen
                 setState(() => _showBookComplete = true);
               } else {
+                context.read<TtsNotifier>().stop();
+                context.read<TtsNotifier>().clearContent();
                 _animatePageTurn(-1);
               }
               break;
             case 'prev':
               _animatePageTurn(1); // Slide right
               notifier.previousChapter();
+              context.read<TtsNotifier>().stop();
+              context.read<TtsNotifier>().clearContent();
               break;
             default:
               // Handle scroll position message
@@ -634,8 +448,11 @@ class _ReaderScreenState extends State<ReaderScreen>
       )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageFinished: (String url) {
-            _injectJS();
+          onPageFinished: (String url) async {
+            // Load and inject JS from asset
+            final jsString = await rootBundle.loadString('assets/js/reader.js');
+            _controller.runJavaScript(jsString);
+
             _isPageReady = true; // JS is now ready
             // Restore saved highlights for current chapter
             _restoreHighlights();
@@ -672,308 +489,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // CSS is now baked into HTML in _loadChapterContent - no separate injection needed
 
-  void _injectJS() {
-    // Inject swipe and tap handlers
-    _controller.runJavaScript('''
-      // Track for double-tap detection
-      var lastTapTime = 0;
-      var lastTapTarget = null;
-      var tapTimeout = null;
-      
-      // Swipe detection
-      var touchStartX = 0;
-      var touchStartY = 0;
-      var touchStartTime = 0;
-      
-      document.addEventListener('touchstart', function(e) {
-        touchStartX = e.touches[0].clientX;
-        touchStartY = e.touches[0].clientY;
-        touchStartTime = Date.now();
-      }, { passive: true });
-
-      document.addEventListener('touchend', function(e) {
-        var touchEndX = e.changedTouches[0].clientX;
-        var touchEndY = e.changedTouches[0].clientY;
-        var deltaX = touchEndX - touchStartX;
-        var deltaY = touchEndY - touchStartY;
-        var deltaTime = Date.now() - touchStartTime;
-
-        // Only detect horizontal swipes (not vertical scrolling)
-        // Require: >50px horizontal, <150px vertical, <700ms duration
-        if (Math.abs(deltaX) > 50 && Math.abs(deltaY) < 150 && deltaTime < 700) {
-          if (deltaX > 0) {
-            // Swipe right = previous chapter
-            ReaderChannel.postMessage('prev');
-          } else {
-            // Swipe left = next chapter
-            ReaderChannel.postMessage('next');
-          }
-        }
-      }, { passive: true });
-      
-      document.body.addEventListener('click', function(e) {
-        var now = Date.now();
-
-        // Check for double-tap on TTS paragraph/sentence FIRST
-        // (before selection check, so browser's double-click text selection doesn't interfere)
-        var target = e.target.closest('[data-para]');
-
-        if (target && lastTapTarget === target && (now - lastTapTime) < 400) {
-          // Double tap detected - skip to this paragraph/sentence
-          clearTimeout(tapTimeout);
-          // Clear any text selection that may have occurred
-          window.getSelection().removeAllRanges();
-          var paraIndex = target.getAttribute('data-para');
-          var sentIndex = target.getAttribute('data-sent');
-          if (sentIndex !== null) {
-            ReaderChannel.postMessage('tts-skip:' + paraIndex + ':' + sentIndex);
-          } else {
-            ReaderChannel.postMessage('tts-skip:' + paraIndex);
-          }
-          lastTapTime = 0;
-          lastTapTarget = null;
-          e.preventDefault();
-          e.stopPropagation();
-          return;
-        }
-
-        // Don't trigger if user is selecting text (by dragging)
-        if (window.getSelection().toString().length > 0) return;
-
-        lastTapTime = now;
-        lastTapTarget = target;
-
-        // Delay single-tap to allow for double-tap detection
-        clearTimeout(tapTimeout);
-        tapTimeout = setTimeout(function() {
-          // Single tap toggles UI (no more edge navigation)
-          ReaderChannel.postMessage('toggle');
-        }, target ? 400 : 0);
-      });
-      
-      // TTS highlight functions
-      window.ttsHighlightParagraph = function(index) {
-        // Remove previous highlight
-        var prev = document.querySelector('.tts-highlight');
-        if (prev) prev.classList.remove('tts-highlight');
-        
-        // Find paragraph by data-para attribute
-        var el = document.querySelector('[data-para="' + index + '"]');
-        if (el) {
-          el.classList.add('tts-highlight');
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      };
-      
-      window.ttsHighlightSentence = function(paraIndex, sentIndex) {
-        // Remove previous highlight
-        var prev = document.querySelector('.tts-highlight');
-        if (prev) prev.classList.remove('tts-highlight');
-        
-        // Find sentence by data-para and data-sent attributes
-        var el = document.querySelector('[data-para="' + paraIndex + '"][data-sent="' + sentIndex + '"]');
-        if (el) {
-          el.classList.add('tts-highlight');
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        } else {
-          // Fallback to paragraph highlight if no sentence span found
-          window.ttsHighlightParagraph(paraIndex);
-        }
-      };
-      
-      window.ttsClearHighlight = function() {
-        var prev = document.querySelector('.tts-highlight');
-        if (prev) prev.classList.remove('tts-highlight');
-      };
-
-      // Scroll listener to update Flutter state
-      var scrollTimeout;
-      window.addEventListener('scroll', function() {
-        clearTimeout(scrollTimeout);
-        scrollTimeout = setTimeout(function() {
-          ReaderChannel.postMessage('scroll:' + window.scrollY);
-        }, 200);
-      });
-
-      // Search functions
-      window._searchMatches = [];
-      window._searchIndex = -1;
-
-      window.searchFind = function(query) {
-        window.searchClear();
-        if (!query || query.length === 0) {
-          ReaderChannel.postMessage('search-results:0');
-          return;
-        }
-        var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-        var textNodes = [];
-        while (walker.nextNode()) textNodes.push(walker.currentNode);
-        var lowerQ = query.toLowerCase();
-        var count = 0;
-        textNodes.forEach(function(node) {
-          var text = node.nodeValue;
-          var lower = text.toLowerCase();
-          var idx = lower.indexOf(lowerQ);
-          if (idx === -1) return;
-          var parent = node.parentNode;
-          var frag = document.createDocumentFragment();
-          var last = 0;
-          while (idx !== -1) {
-            if (idx > last) frag.appendChild(document.createTextNode(text.substring(last, idx)));
-            var mark = document.createElement('mark');
-            mark.className = 'search-match';
-            mark.setAttribute('data-si', count.toString());
-            mark.textContent = text.substring(idx, idx + query.length);
-            frag.appendChild(mark);
-            count++;
-            last = idx + query.length;
-            idx = lower.indexOf(lowerQ, last);
-          }
-          if (last < text.length) frag.appendChild(document.createTextNode(text.substring(last)));
-          parent.replaceChild(frag, node);
-        });
-        window._searchMatches = document.querySelectorAll('.search-match');
-        if (count > 0) {
-          window._searchIndex = 0;
-          window._searchMatches[0].classList.add('search-current');
-          window._searchMatches[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-        ReaderChannel.postMessage('search-results:' + count);
-      };
-
-      window.searchNext = function() {
-        var m = window._searchMatches;
-        if (!m || m.length === 0) return;
-        m[window._searchIndex].classList.remove('search-current');
-        window._searchIndex = (window._searchIndex + 1) % m.length;
-        m[window._searchIndex].classList.add('search-current');
-        m[window._searchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
-        ReaderChannel.postMessage('search-index:' + window._searchIndex);
-      };
-
-      window.searchPrev = function() {
-        var m = window._searchMatches;
-        if (!m || m.length === 0) return;
-        m[window._searchIndex].classList.remove('search-current');
-        window._searchIndex = (window._searchIndex - 1 + m.length) % m.length;
-        m[window._searchIndex].classList.add('search-current');
-        m[window._searchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
-        ReaderChannel.postMessage('search-index:' + window._searchIndex);
-      };
-
-      window.searchClear = function() {
-        var marks = document.querySelectorAll('.search-match');
-        marks.forEach(function(mk) {
-          var p = mk.parentNode;
-          p.replaceChild(document.createTextNode(mk.textContent), mk);
-          p.normalize();
-        });
-        window._searchMatches = [];
-        window._searchIndex = -1;
-      };
-
-      // ── Highlight system ──────────────────────────────────────────
-      // Listen for text selection changes
-      var selectionTimeout;
-      document.addEventListener('selectionchange', function() {
-        clearTimeout(selectionTimeout);
-        selectionTimeout = setTimeout(function() {
-          var sel = window.getSelection();
-          if (sel && sel.toString().trim().length > 0 && sel.rangeCount > 0) {
-            var range = sel.getRangeAt(0);
-            // Calculate text offset within the body
-            var preRange = document.createRange();
-            preRange.selectNodeContents(document.body);
-            preRange.setEnd(range.startContainer, range.startOffset);
-            var startOffset = preRange.toString().length;
-            var endOffset = startOffset + sel.toString().length;
-            ReaderChannel.postMessage('selection:' + JSON.stringify({
-              text: sel.toString().trim(),
-              startOffset: startOffset,
-              endOffset: endOffset
-            }));
-          } else {
-            ReaderChannel.postMessage('selection-cleared');
-          }
-        }, 300);
-      });
-
-      // Apply a highlight visually
-      window.applyHighlight = function(startOffset, endOffset, color, hlId) {
-        var body = document.body;
-        var walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT, null, false);
-        var charCount = 0;
-        var nodesToWrap = [];
-
-        while (walker.nextNode()) {
-          var node = walker.currentNode;
-          var nodeLen = node.nodeValue.length;
-          var nodeStart = charCount;
-          var nodeEnd = charCount + nodeLen;
-
-          if (nodeEnd > startOffset && nodeStart < endOffset) {
-            var wrapStart = Math.max(0, startOffset - nodeStart);
-            var wrapEnd = Math.min(nodeLen, endOffset - nodeStart);
-            nodesToWrap.push({ node: node, start: wrapStart, end: wrapEnd });
-          }
-          charCount += nodeLen;
-          if (charCount >= endOffset) break;
-        }
-
-        for (var i = nodesToWrap.length - 1; i >= 0; i--) {
-          var item = nodesToWrap[i];
-          var range = document.createRange();
-          range.setStart(item.node, item.start);
-          range.setEnd(item.node, item.end);
-          var mark = document.createElement('mark');
-          mark.className = 'user-highlight';
-          mark.setAttribute('data-hl-id', hlId);
-          mark.style.setProperty('background-color', color, 'important');
-          mark.style.setProperty('border-radius', '2px', 'important');
-          mark.style.setProperty('padding', '1px 0', 'important');
-          try {
-            range.surroundContents(mark);
-          } catch(e) {
-            // If surroundContents fails (partial overlap), use extractContents
-            var frag = range.extractContents();
-            mark.appendChild(frag);
-            range.insertNode(mark);
-          }
-        }
-        // Clear selection after highlighting
-        window.getSelection().removeAllRanges();
-      };
-
-      // Remove a highlight by ID
-      window.removeHighlight = function(hlId) {
-        var marks = document.querySelectorAll('mark[data-hl-id="' + hlId + '"]');
-        marks.forEach(function(mark) {
-          var parent = mark.parentNode;
-          while (mark.firstChild) {
-            parent.insertBefore(mark.firstChild, mark);
-          }
-          parent.removeChild(mark);
-          parent.normalize();
-        });
-      };
-
-      // Restore all highlights from JSON
-      window.restoreHighlights = function(highlightsJson) {
-        var highlights = JSON.parse(highlightsJson);
-        highlights.forEach(function(h) {
-          window.applyHighlight(h.startOffset, h.endOffset, h.color, h.id);
-        });
-      };
-
-      // Scroll to a specific highlight by ID
-      window.scrollToHighlight = function(hlId) {
-        var el = document.querySelector('mark[data-hl-id="' + hlId + '"]');
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      };
-    ''');
-  }
+  // JS is loaded directly from asset in _initController
 
   /// Update WebView TTS highlight based on current TTS state and mode
   void _updateTtsHighlight(TtsNotifier ttsNotifier) {
@@ -1040,12 +556,17 @@ class _ReaderScreenState extends State<ReaderScreen>
       floatingActionButton: notifier.currentChapter != null
           ? Consumer<TtsNotifier>(
               builder: (context, ttsNotifier, _) {
-                return _buildTtsFab(
-                  ttsNotifier,
-                  notifier,
-                  showUI,
-                  readerTheme,
-                )!;
+                return KeyedSubtree(
+                  key: _fabKey,
+                  child: TtsFab(
+                    ttsNotifier: ttsNotifier,
+                    readerNotifier: notifier,
+                    showUI: showUI,
+                    isOverlayOpen:
+                        _showColorPicker || _showSearch || _showBookComplete,
+                    readerTheme: readerTheme,
+                  ),
+                );
               },
             )
           : null,
@@ -1212,8 +733,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                                   fontSize: 12.5,
                                   color: readerTheme.textColor.withAlpha(100),
                                   decoration: TextDecoration.underline,
-                                  decorationColor:
-                                      readerTheme.textColor.withAlpha(60),
+                                  decorationColor: readerTheme.textColor
+                                      .withAlpha(60),
                                 ),
                               ),
                             ],
@@ -1235,7 +756,12 @@ class _ReaderScreenState extends State<ReaderScreen>
               left: 16,
               right: 16,
               bottom: MediaQuery.of(context).padding.bottom + 60,
-              child: _buildGlobalSearchOverlay(readerTheme),
+              child: GlobalSearchOverlay(
+                readerTheme: readerTheme,
+                notifier: notifier,
+                onResultTap: _onSearchResultTap,
+                onClose: _closeSearch,
+              ),
             ),
 
           // Color picker overlay for highlighting
@@ -1244,13 +770,58 @@ class _ReaderScreenState extends State<ReaderScreen>
               top: MediaQuery.of(context).padding.top + kToolbarHeight + 8,
               left: 0,
               right: 0,
-              child: _buildColorPicker(readerTheme, notifier),
+              child: Stack(
+                children: [
+                  ColorPickerBar(
+                    readerTheme: readerTheme,
+                    notifier: notifier,
+                    selectedText: _selectedText,
+                    onHighlightSelected: _applyHighlight,
+                  ),
+                  Positioned(
+                    right: 16,
+                    top: 10,
+                    child: GestureDetector(
+                      onTap: () {
+                        _controller.runJavaScript(
+                          'window.getSelection().removeAllRanges();',
+                        );
+                        setState(() => _showColorPicker = false);
+                      },
+                      child: Container(
+                        width: 28,
+                        height: 28,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: readerTheme.textColor.withAlpha(20),
+                        ),
+                        child: Icon(
+                          Icons.close,
+                          size: 16,
+                          color: readerTheme.textColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
 
           // Book complete overlay
           if (_showBookComplete)
             Positioned.fill(
-              child: _buildBookCompleteScreen(notifier, readerTheme),
+              child: BookCompleteOverlay(
+                readerTheme: readerTheme,
+                onBackToLibrary: () => context.go('/'),
+                onStayHere: () => setState(() => _showBookComplete = false),
+                onStartOver: () {
+                  final chapters = notifier.currentBook?.Chapters;
+                  if (chapters != null && chapters.isNotEmpty) {
+                    notifier.jumpToChapter(chapters.first);
+                  }
+                  setState(() => _showBookComplete = false);
+                },
+              ),
             ),
 
           // Tutorial overlay covers the full screen including the ad area
@@ -1294,271 +865,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  Widget? _buildTtsFab(
-    TtsNotifier ttsNotifier,
-    ReaderNotifier readerNotifier,
-    bool showUI,
-    ReaderTheme readerTheme,
-  ) {
-    // Only show FAB when content is loaded
-    if (readerNotifier.currentChapter == null) return null;
-
-    final currentChapterTitle = readerNotifier.currentChapter?.Title;
-
-    // Detect chapter change - stop TTS and clear content
-    // Skip the first build (_lastChapterTitle == null) so re-entering the
-    // reader from the library doesn't falsely clear TTS position.
-    if (_lastChapterTitle == null) {
-      _lastChapterTitle = currentChapterTitle;
-    } else if (_lastChapterTitle != currentChapterTitle) {
-      _lastChapterTitle = currentChapterTitle;
-      // Schedule content clear after build (not during build)
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (ttsNotifier.isPlaying || ttsNotifier.isPaused) {
-          ttsNotifier.stop();
-        }
-        // Clear chunks so next play loads new chapter
-        ttsNotifier.loadContent('');
-      });
-    }
-
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      margin: EdgeInsets.only(bottom: showUI ? 140 : 66),
-      child: FloatingActionButton(
-        key: _fabKey,
-        onPressed: () async {
-          // Load current chapter content
-          if (ttsNotifier.chunks.isEmpty) {
-            final text = readerNotifier.extractStructuredText();
-            if (text.isNotEmpty) {
-              ttsNotifier.loadContent(text);
-            }
-          }
-
-          // Update notification metadata
-          context.read<VelumAudioHandler>().setMediaMetadata(
-            bookTitle: readerNotifier.currentBook?.Title ?? 'Unknown Book',
-            chapterTitle:
-                readerNotifier.currentChapter?.Title ?? 'Unknown Chapter',
-          );
-
-          await ttsNotifier.togglePlayPause();
-        },
-        backgroundColor: _accentGreen,
-        child: Icon(
-          ttsNotifier.isPlaying ? Icons.pause : Icons.play_arrow,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildColorPicker(ReaderTheme readerTheme, ReaderNotifier notifier) {
-    const colorOptions = <String, Color>{
-      'yellow': Color(0xFFFFF176),
-      'green': Color(0xFF81C784),
-      'blue': Color(0xFF64B5F6),
-      'pink': Color(0xFFF48FB1),
-      'orange': Color(0xFFFFB74D),
-    };
-
-    return Center(
-      child: Material(
-        elevation: 8,
-        borderRadius: BorderRadius.circular(28),
-        color: readerTheme.backgroundColor,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: readerTheme.textColor.withAlpha(30)),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ...colorOptions.entries.map((entry) {
-                return GestureDetector(
-                  onTap: () =>
-                      _applyHighlight(entry.key, entry.value, notifier),
-                  child: Container(
-                    width: 32,
-                    height: 32,
-                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                    decoration: BoxDecoration(
-                      color: entry.value,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: entry.value.withAlpha(200),
-                        width: 2,
-                      ),
-                    ),
-                  ),
-                );
-              }),
-              const SizedBox(width: 4),
-              GestureDetector(
-                onTap: () {
-                  _controller.runJavaScript(
-                    'window.getSelection().removeAllRanges();',
-                  );
-                  setState(() => _showColorPicker = false);
-                },
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: readerTheme.textColor.withAlpha(20),
-                  ),
-                  child: Icon(
-                    Icons.close,
-                    size: 16,
-                    color: readerTheme.textColor,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildBookCompleteScreen(
-    ReaderNotifier notifier,
-    ReaderTheme readerTheme,
-  ) {
-    final bookTitle = notifier.currentBook?.Title ?? 'the book';
-
-    return Material(
-      color: readerTheme.backgroundColor.withAlpha((0.96 * 255).round()),
-      child: SafeArea(
-        child: Center(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Icon
-                Container(
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: _accentGreen.withAlpha(30),
-                  ),
-                  child: const Icon(
-                    Icons.menu_book_rounded,
-                    size: 48,
-                    color: _accentGreen,
-                  ),
-                ),
-                const SizedBox(height: 28),
-
-                // Heading
-                Text(
-                  'You finished it!',
-                  style: TextStyle(
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    color: readerTheme.textColor,
-                    letterSpacing: 0.2,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 12),
-
-                // Book title
-                Text(
-                  bookTitle,
-                  style: TextStyle(
-                    fontSize: 15,
-                    color: readerTheme.textColor.withAlpha(160),
-                    height: 1.4,
-                  ),
-                  textAlign: TextAlign.center,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 48),
-
-                // Back to Library button
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: () => context.go('/'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _accentGreen,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    icon: const Icon(Icons.library_books_rounded, size: 20),
-                    label: const Text(
-                      'Back to Library',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Start Over button
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () {
-                      final chapters = notifier.currentBook?.Chapters;
-                      if (chapters != null && chapters.isNotEmpty) {
-                        notifier.jumpToChapter(chapters.first);
-                      }
-                      setState(() => _showBookComplete = false);
-                    },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: readerTheme.textColor,
-                      side: BorderSide(
-                        color: readerTheme.textColor.withAlpha(60),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                    ),
-                    icon: const Icon(Icons.replay_rounded, size: 20),
-                    label: const Text(
-                      'Start Over',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // Dismiss — keep reading at the last chapter
-                TextButton(
-                  onPressed: () => setState(() => _showBookComplete = false),
-                  child: Text(
-                    'Stay here',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: readerTheme.textColor.withAlpha(120),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+  // _buildTtsFab, _buildColorPicker, _buildBookCompleteScreen extracted to widgets
 
   void _navigateToHighlight(Highlight highlight, ReaderNotifier notifier) {
     final chapters = notifier.currentBook?.Chapters;
@@ -1610,8 +917,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     _controller.runJavaScript("window.restoreHighlights('$jsonStr');");
   }
 
-  void _applyHighlight(String colorName, Color color, ReaderNotifier notifier) {
+  void _applyHighlight(String colorName, Color color) {
     final highlightNotifier = context.read<HighlightNotifier>();
+    final notifier = context.read<ReaderNotifier>();
     final chapterIndex = notifier.currentChapterIndex;
 
     // Convert color to CSS rgba

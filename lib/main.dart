@@ -6,19 +6,21 @@ import 'package:audio_service/audio_service.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 
+import 'package:hive_flutter/hive_flutter.dart';
+
 import 'features/settings/data/models/reader_settings.dart';
 import 'features/settings/presentation/providers/settings_notifier.dart';
 import 'features/reader/data/services/epub_service.dart';
 import 'features/reader/data/services/highlight_service.dart';
 import 'features/reader/presentation/providers/reader_notifier.dart';
 import 'features/reader/presentation/providers/highlight_notifier.dart';
+import 'features/library/data/models/scanned_book.dart';
 import 'features/library/data/services/library_service.dart';
 import 'features/library/presentation/providers/library_notifier.dart';
 import 'features/tts/data/services/tts_service.dart';
 import 'features/tts/data/services/velum_audio_handler.dart';
 
 import 'features/tts/presentation/providers/tts_notifier.dart';
-import 'core/services/ad_service.dart';
 import 'core/providers/ad_notifier.dart';
 
 late VelumAudioHandler audioHandler;
@@ -31,7 +33,16 @@ void main() async {
 
   // Initialize SharedPreferences
   final prefs = await SharedPreferences.getInstance();
-  final libraryService = LibraryService(prefs);
+
+  // Initialize Hive
+  await Hive.initFlutter();
+  Hive.registerAdapter(ScannedBookAdapter());
+  final booksBox = await Hive.openBox<ScannedBook>('books_box');
+
+  final libraryService = LibraryService(prefs, booksBox);
+  // Migrate old SharedPreferences data to Hive if necessary
+  await libraryService.migrateFromSharedPreferencesIfNeeded();
+
   final highlightService = HighlightService(prefs);
   final ttsService = TtsService();
 
