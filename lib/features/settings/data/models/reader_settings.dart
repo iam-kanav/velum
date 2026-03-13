@@ -67,6 +67,7 @@ class ReaderSettings extends Equatable {
   selectedCustomFontId; // ID of the currently selected custom font
   final double fontSize;
   final double lineHeight;
+  final double paragraphSpacing;
 
   const ReaderSettings({
     this.appTheme = ReaderTheme.light,
@@ -76,6 +77,7 @@ class ReaderSettings extends Equatable {
     this.selectedCustomFontId,
     this.fontSize = 18.0,
     this.lineHeight = 1.6,
+    this.paragraphSpacing = 1.2,
   });
 
   // Convenience getter for backward compatibility
@@ -89,6 +91,7 @@ class ReaderSettings extends Equatable {
     String? selectedCustomFontId,
     double? fontSize,
     double? lineHeight,
+    double? paragraphSpacing,
   }) {
     return ReaderSettings(
       appTheme: appTheme ?? this.appTheme,
@@ -98,6 +101,7 @@ class ReaderSettings extends Equatable {
       selectedCustomFontId: selectedCustomFontId ?? this.selectedCustomFontId,
       fontSize: fontSize ?? this.fontSize,
       lineHeight: lineHeight ?? this.lineHeight,
+      paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
     );
   }
 
@@ -110,5 +114,6 @@ class ReaderSettings extends Equatable {
     selectedCustomFontId,
     fontSize,
     lineHeight,
+    paragraphSpacing,
   ];
 }

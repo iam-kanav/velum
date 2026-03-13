@@ -436,8 +436,9 @@ class ReaderNotifier extends ChangeNotifier {
     return paragraphs.join('\n\n');
   }
 
-  /// Process HTML to wrap sentences in spans for sentence-level highlighting
-  /// Returns the processed HTML with each sentence wrapped in <span class="tts-sent" data-para="X" data-sent="Y">
+  /// Process HTML to wrap sentences in spans for sentence-level highlighting.
+  /// Preserves inner HTML tags (<i>, <b>, <a>, etc.) by splitting on the
+  /// innerHTML string rather than plain text.
   String processHtmlForSentenceHighlight(String htmlContent) {
     final document = html_parser.parse(htmlContent);
     final body = document.body;
@@ -452,8 +453,8 @@ class ReaderNotifier extends ChangeNotifier {
       final text = p.text.trim();
       if (text.isEmpty) continue;
 
-      // Split into sentences
-      final sentences = _splitIntoSentences(text);
+      // Split innerHTML into sentences, preserving inner tags
+      final sentences = _splitHtmlIntoSentences(p.innerHtml);
       if (sentences.length <= 1) {
         // Single sentence - just add paragraph attributes
         p.attributes['data-para'] = paraIndex.toString();
@@ -467,7 +468,7 @@ class ReaderNotifier extends ChangeNotifier {
           newInnerHtml.write(
             '<span class="tts-sent" data-para="$paraIndex" data-sent="$sIdx">$sentence</span>',
           );
-          // Add space between sentences
+          // Add space between sentences for correct rendering
           if (sIdx < sentences.length - 1) newInnerHtml.write(' ');
         }
         p.innerHtml = newInnerHtml.toString();
@@ -480,11 +481,65 @@ class ReaderNotifier extends ChangeNotifier {
     return body.innerHtml;
   }
 
-  /// Split text into sentences (same logic as TtsService)
-  List<String> _splitIntoSentences(String text) {
-    // Split on sentence-ending punctuation followed by space or end
-    final regex = RegExp(r'(?<=[.!?])\s+');
-    return text.split(regex);
+  /// Split an HTML string into sentences, preserving inner tags (<i>, <b>, <a>, etc.).
+  /// Splits at sentence-ending punctuation ([.!?]) followed by whitespace,
+  /// but only when the punctuation is in text content (not inside an HTML tag).
+  List<String> _splitHtmlIntoSentences(String html) {
+    final sentences = <String>[];
+    final current = StringBuffer();
+    bool inTag = false;
+
+    int i = 0;
+    while (i < html.length) {
+      final char = html[i];
+
+      if (char == '<') {
+        inTag = true;
+        current.write(char);
+        i++;
+        continue;
+      }
+      if (char == '>') {
+        inTag = false;
+        current.write(char);
+        i++;
+        continue;
+      }
+
+      current.write(char);
+
+      // Check for sentence boundary: punctuation followed by whitespace, not inside a tag
+      if (!inTag && (char == '.' || char == '!' || char == '?')) {
+        if (i + 1 < html.length) {
+          final next = html[i + 1];
+          if (next == ' ' || next == '\n' || next == '\t' || next == '\r') {
+            // Sentence boundary found
+            sentences.add(current.toString());
+            current.clear();
+            // Skip the whitespace between sentences
+            i++;
+            while (i + 1 < html.length) {
+              final c = html[i + 1];
+              if (c == ' ' || c == '\n' || c == '\t' || c == '\r') {
+                i++;
+              } else {
+                break;
+              }
+            }
+            i++;
+            continue;
+          }
+        }
+      }
+
+      i++;
+    }
+
+    if (current.isNotEmpty) {
+      sentences.add(current.toString());
+    }
+
+    return sentences;
   }
 
   /// Get processed HTML with images replaced and sentences wrapped for TTS.

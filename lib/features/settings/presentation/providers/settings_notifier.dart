@@ -17,6 +17,7 @@ class SettingsNotifier extends ChangeNotifier {
   static const String _lineHeightKey = 'line_height';
   static const String _customFontsKey = 'custom_fonts_list';
   static const String _selectedCustomFontIdKey = 'selected_custom_font_id';
+  static const String _paragraphSpacingKey = 'paragraph_spacing';
 
   final SharedPreferences _prefs;
   ReaderSettings _settings = const ReaderSettings();
@@ -39,6 +40,7 @@ class SettingsNotifier extends ChangeNotifier {
     final fontIndex = _prefs.getInt(_fontKey) ?? 0;
     final fontSize = _prefs.getDouble(_fontSizeKey) ?? 18.0;
     final lineHeight = _prefs.getDouble(_lineHeightKey) ?? 1.6;
+    final paragraphSpacing = _prefs.getDouble(_paragraphSpacingKey) ?? 1.2;
 
     // Load custom fonts
     List<CustomFont> customFonts = [];
@@ -64,6 +66,7 @@ class SettingsNotifier extends ChangeNotifier {
       selectedCustomFontId: selectedCustomFontId,
       fontSize: fontSize.clamp(12.0, 32.0),
       lineHeight: lineHeight.clamp(1.0, 2.5),
+      paragraphSpacing: paragraphSpacing.clamp(0.0, 3.0),
     );
     notifyListeners();
   }
@@ -76,6 +79,7 @@ class SettingsNotifier extends ChangeNotifier {
       _prefs.setInt(_fontKey, _settings.font.index),
       _prefs.setDouble(_fontSizeKey, _settings.fontSize),
       _prefs.setDouble(_lineHeightKey, _settings.lineHeight),
+      _prefs.setDouble(_paragraphSpacingKey, _settings.paragraphSpacing),
       _prefs.setString(
         _customFontsKey,
         jsonEncode(_settings.customFonts.map((e) => e.toJson()).toList()),
@@ -224,6 +228,13 @@ class SettingsNotifier extends ChangeNotifier {
   void updateLineHeight(double height) {
     height = height.clamp(1.0, 2.5);
     _settings = _settings.copyWith(lineHeight: height);
+    _saveSettings();
+    notifyListeners();
+  }
+
+  void updateParagraphSpacing(double spacing) {
+    spacing = spacing.clamp(0.0, 3.0);
+    _settings = _settings.copyWith(paragraphSpacing: spacing);
     _saveSettings();
     notifyListeners();
   }

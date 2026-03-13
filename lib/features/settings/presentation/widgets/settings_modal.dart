@@ -430,6 +430,47 @@ class _SettingsModalState extends State<SettingsModal> {
               );
             },
           ),
+          const SizedBox(height: 16),
+
+          // Paragraph Spacing Slider
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Paragraph Spacing',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: readerTheme.textColor,
+                ),
+              ),
+              Consumer<SettingsNotifier>(
+                builder: (context, notifier, _) {
+                  return Text(
+                    notifier.settings.paragraphSpacing.toStringAsFixed(1),
+                    style: TextStyle(color: readerTheme.textColor),
+                  );
+                },
+              ),
+            ],
+          ),
+          Consumer<SettingsNotifier>(
+            builder: (context, notifier, _) {
+              return SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: _accentGreen,
+                  inactiveTrackColor: readerTheme.textColor.withAlpha(40),
+                  thumbColor: _accentGreen,
+                ),
+                child: Slider(
+                  value: notifier.settings.paragraphSpacing,
+                  min: 0.0,
+                  max: 3.0,
+                  divisions: 30,
+                  onChanged: (val) => notifier.updateParagraphSpacing(val),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );

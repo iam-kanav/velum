@@ -652,11 +652,19 @@ class _ReaderScreenState extends State<ReaderScreen>
                                 color: readerTheme.textColor,
                               ),
                               onPressed: () async {
+                                final readerNotif = context.read<ReaderNotifier>();
+                                final highlightNotif = context.read<HighlightNotifier>();
                                 final highlight =
                                     await showModalBottomSheet<Highlight>(
                                       context: context,
                                       backgroundColor: Colors.transparent,
-                                      builder: (_) => const HighlightsModal(),
+                                      builder: (_) => MultiProvider(
+                                        providers: [
+                                          ChangeNotifierProvider.value(value: readerNotif),
+                                          ChangeNotifierProvider.value(value: highlightNotif),
+                                        ],
+                                        child: const HighlightsModal(),
+                                      ),
                                     );
                                 if (highlight != null && mounted) {
                                   _navigateToHighlight(highlight, notifier);
@@ -668,10 +676,14 @@ class _ReaderScreenState extends State<ReaderScreen>
                               child: GestureDetector(
                                 key: _chapterNameKey,
                                 onTap: () {
+                                  final readerNotif = context.read<ReaderNotifier>();
                                   showModalBottomSheet(
                                     context: context,
                                     backgroundColor: Colors.transparent,
-                                    builder: (_) => const ContentsModal(),
+                                    builder: (_) => ChangeNotifierProvider.value(
+                                      value: readerNotif,
+                                      child: const ContentsModal(),
+                                    ),
                                   );
                                 },
                                 child: Text(
@@ -694,10 +706,14 @@ class _ReaderScreenState extends State<ReaderScreen>
                                 color: readerTheme.textColor,
                               ),
                               onPressed: () {
+                                final ttsNotif = context.read<TtsNotifier>();
                                 showModalBottomSheet(
                                   context: context,
                                   backgroundColor: Colors.transparent,
-                                  builder: (_) => const SettingsModal(),
+                                  builder: (_) => ChangeNotifierProvider.value(
+                                    value: ttsNotif,
+                                    child: const SettingsModal(),
+                                  ),
                                 );
                               },
                             ),
@@ -955,78 +971,25 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _isInitialLoad = true;
   ReaderSettings? _lastSettings;
 
-  void _loadChapterContent(String? htmlContent) {
-    final settings = context.read<SettingsNotifier>().settings;
-
-    if (htmlContent == null) return;
-
-    // Only reload if content OR settings actually changed
-    final contentSame = htmlContent == _lastHtmlContent;
-    final settingsSame = settings == _lastSettings;
-
-    if (contentSame && settingsSame) {
-      // Nothing changed - don't reload (prevents glitch on UI toggle)
-      return;
-    }
-
-    // If same chapter content but settings changed - preserve scroll
-    if (contentSame && !settingsSame) {
-      // Save scroll position before reload
-      _controller.runJavaScript(
-        'ReaderChannel.postMessage("scroll:" + window.scrollY);',
-      );
-      _shouldRestoreScroll = true;
-    } else {
-      // New chapter
-      if (_isInitialLoad) {
-        // First load - try to restore saved position
-        final savedScroll = context
-            .read<ReaderNotifier>()
-            .getSavedScrollPosition(widget.assetPath);
-        if (savedScroll > 0) {
-          _savedScrollPosition = savedScroll;
-          _shouldRestoreScroll = true;
-        }
-        _isInitialLoad = false;
-      } else {
-        // Regular navigation - start at top
-        _shouldRestoreScroll = false;
-        _savedScrollPosition = 0;
-      }
-    }
-
-    _lastHtmlContent = htmlContent;
-    _lastSettings = settings;
-
-    // Compute colors
+  /// Build dynamic CSS string from current settings.
+  /// Used both for initial HTML and for live JS-based CSS updates.
+  String _buildDynamicCss(ReaderSettings settings) {
     final r = (settings.theme.textColor.r * 255.0).round().clamp(0, 255);
     final g = (settings.theme.textColor.g * 255.0).round().clamp(0, 255);
     final b = (settings.theme.textColor.b * 255.0).round().clamp(0, 255);
     final themeColorHex =
         '#${r.toRadixString(16).padLeft(2, '0')}${g.toRadixString(16).padLeft(2, '0')}${b.toRadixString(16).padLeft(2, '0')}';
 
-    final bgR = (settings.theme.backgroundColor.r * 255.0).round().clamp(
-      0,
-      255,
-    );
-    final bgG = (settings.theme.backgroundColor.g * 255.0).round().clamp(
-      0,
-      255,
-    );
-    final bgB = (settings.theme.backgroundColor.b * 255.0).round().clamp(
-      0,
-      255,
-    );
+    final bgR = (settings.theme.backgroundColor.r * 255.0).round().clamp(0, 255);
+    final bgG = (settings.theme.backgroundColor.g * 255.0).round().clamp(0, 255);
+    final bgB = (settings.theme.backgroundColor.b * 255.0).round().clamp(0, 255);
     final bgColorHex =
         '#${bgR.toRadixString(16).padLeft(2, '0')}${bgG.toRadixString(16).padLeft(2, '0')}${bgB.toRadixString(16).padLeft(2, '0')}';
 
-    final linkColor = settings.theme == ReaderTheme.dark
-        ? '#64B5F6'
-        : '#1976D2';
+    final linkColor = settings.theme == ReaderTheme.dark ? '#64B5F6' : '#1976D2';
 
-    // Prepare Font CSS
-    String fontCss = '';
     String fontFamily = settings.font.fontFamily;
+    String fontCss = '';
 
     if (settings.font == ReaderFont.custom &&
         settings.selectedCustomFontId != null) {
@@ -1036,7 +999,6 @@ class _ReaderScreenState extends State<ReaderScreen>
           orElse: () => throw Exception('Font not found'),
         );
 
-        // Cache font bytes to avoid blocking file I/O on every content load
         if (selectedFont.path != _cachedFontPath || _cachedFontBase64 == null) {
           final fontFile = File(selectedFont.path);
           if (fontFile.existsSync()) {
@@ -1048,8 +1010,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
         if (_cachedFontBase64 != null) {
           fontFamily = 'CustomFont';
-          fontCss =
-              '''
+          fontCss = '''
             @font-face {
               font-family: 'CustomFont';
               src: url(data:font/ttf;base64,$_cachedFontBase64) format('truetype');
@@ -1058,26 +1019,11 @@ class _ReaderScreenState extends State<ReaderScreen>
         }
       } catch (e) {
         debugPrint('Error loading custom font: $e');
-        // Fallback to serif if custom font fails
         fontFamily = 'serif';
       }
     }
 
-    debugPrint(
-      'Theme: ${settings.theme}, TextColor: $themeColorHex, BgColor: $bgColorHex, Font: $fontFamily',
-    );
-
-    // Ultra-simple HTML with inline styles on body for maximum compatibility
-    final combinedHtml =
-        '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <style>
-    @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&family=Inter:wght@300;400;600&family=Roboto+Mono&display=swap');
-    
+    return '''
     $fontCss
 
     * {
@@ -1086,7 +1032,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       word-wrap: break-word !important;
       overflow-wrap: break-word !important;
     }
-    
+
     html, body {
       background-color: $bgColorHex !important;
       overscroll-behavior: none !important;
@@ -1113,21 +1059,27 @@ class _ReaderScreenState extends State<ReaderScreen>
       -webkit-hyphens: auto !important;
       transform: translateZ(0) !important;
     }
-    
+
     a { color: $linkColor !important; }
-    
+
     img {
       max-width: 100% !important;
       height: auto !important;
       will-change: transform !important;
     }
-    
+
     p, div, span, li, td, th, h1, h2, h3, h4, h5, h6 {
       word-wrap: break-word !important;
       overflow-wrap: break-word !important;
       max-width: 100% !important;
     }
-    
+
+    p, [data-para], .tts-para, .tts-paragraph {
+      margin-top: 0 !important;
+      margin-bottom: ${settings.paragraphSpacing}em !important;
+      text-indent: 0 !important;
+    }
+
     /* TTS Highlighting Styles */
     .tts-paragraph {
       transition: background-color 0.3s ease, border-radius 0.3s ease;
@@ -1135,7 +1087,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       padding: 2px 4px;
       margin: -2px -4px;
     }
-    
+
     .tts-highlight {
       background-color: rgba(76, 175, 80, 0.25) !important;
       box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
@@ -1158,9 +1110,99 @@ class _ReaderScreenState extends State<ReaderScreen>
       border-radius: 2px;
       padding: 1px 0;
     }
+    ''';
+  }
+
+  /// Update WebView CSS dynamically via JavaScript without reloading the page.
+  /// Called when only settings change (e.g. slider drags for font size, line height).
+  void _updateCssViaJs(ReaderSettings settings) {
+    final css = _buildDynamicCss(settings);
+    final escaped = css
+        .replaceAll('\\', '\\\\')
+        .replaceAll("'", "\\'")
+        .replaceAll('\n', '\\n');
+    _controller.runJavaScript(
+      "document.getElementById('velum-css').textContent = '$escaped';",
+    );
+
+    // Update inline body styles for immediate visual sync
+    final bgR = (settings.theme.backgroundColor.r * 255.0).round().clamp(0, 255);
+    final bgG = (settings.theme.backgroundColor.g * 255.0).round().clamp(0, 255);
+    final bgB = (settings.theme.backgroundColor.b * 255.0).round().clamp(0, 255);
+    final bgColorHex =
+        '#${bgR.toRadixString(16).padLeft(2, '0')}${bgG.toRadixString(16).padLeft(2, '0')}${bgB.toRadixString(16).padLeft(2, '0')}';
+
+    final r = (settings.theme.textColor.r * 255.0).round().clamp(0, 255);
+    final g = (settings.theme.textColor.g * 255.0).round().clamp(0, 255);
+    final b = (settings.theme.textColor.b * 255.0).round().clamp(0, 255);
+    final themeColorHex =
+        '#${r.toRadixString(16).padLeft(2, '0')}${g.toRadixString(16).padLeft(2, '0')}${b.toRadixString(16).padLeft(2, '0')}';
+
+    _controller.runJavaScript(
+      "document.body.style.cssText = 'color: $themeColorHex !important; background-color: $bgColorHex !important;';",
+    );
+  }
+
+  void _loadChapterContent(String? htmlContent) {
+    final settings = context.read<SettingsNotifier>().settings;
+
+    if (htmlContent == null) return;
+
+    // Only reload if content OR settings actually changed
+    final contentSame = htmlContent == _lastHtmlContent;
+    final settingsSame = settings == _lastSettings;
+
+    if (contentSame && settingsSame) {
+      // Nothing changed - don't reload (prevents glitch on UI toggle)
+      return;
+    }
+
+    _lastSettings = settings;
+
+    // If same chapter content but settings changed - update CSS live via JS
+    if (contentSame && !settingsSame) {
+      _updateCssViaJs(settings);
+      return;
+    }
+
+    // New chapter content — full reload needed
+    _lastHtmlContent = htmlContent;
+
+    if (_isInitialLoad) {
+      // First load - try to restore saved position
+      final savedScroll = context
+          .read<ReaderNotifier>()
+          .getSavedScrollPosition(widget.assetPath);
+      if (savedScroll > 0) {
+        _savedScrollPosition = savedScroll;
+        _shouldRestoreScroll = true;
+      }
+      _isInitialLoad = false;
+    } else {
+      // Regular navigation - start at top
+      _shouldRestoreScroll = false;
+      _savedScrollPosition = 0;
+    }
+
+    _isPageReady = false;
+
+    final dynamicCss = _buildDynamicCss(settings);
+
+    final combinedHtml =
+        '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&family=Inter:wght@300;400;600&family=Roboto+Mono&display=swap');
+  </style>
+  <style id="velum-css">
+    $dynamicCss
   </style>
 </head>
-<body style="color: $themeColorHex !important; background-color: $bgColorHex !important;">
+<body>
   $htmlContent
 </body>
 </html>
