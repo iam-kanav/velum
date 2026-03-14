@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:epubx/epubx.dart';
 import 'package:flutter/foundation.dart';
+import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 
 import '../../data/services/epub_service.dart';
@@ -407,6 +408,26 @@ class ReaderNotifier extends ChangeNotifier {
     return text;
   }
 
+  /// Filter block elements to remove any that are ancestors of other elements
+  /// in the list. Prevents wrapper divs from being counted as separate
+  /// paragraphs (which would cause TTS to speak and highlight them as one
+  /// giant chunk covering the entire chapter).
+  static List<dom.Element> _filterToLeafBlocks(List<dom.Element> elements) {
+    if (elements.length <= 1) return elements;
+    return elements.where((el) {
+      // Exclude this element if any other matched element is its descendant
+      return !elements.any((other) {
+        if (identical(other, el)) return false;
+        dom.Node? node = other.parent;
+        while (node != null) {
+          if (identical(node, el)) return true;
+          node = node.parent;
+        }
+        return false;
+      });
+    }).toList();
+  }
+
   /// Extract structured plain text from HTML, matching JS ttsGetParagraphs() order
   /// Only extracts from <p> tags to ensure alignment with JS highlighting
   String extractStructuredText() {
@@ -421,9 +442,11 @@ class ReaderNotifier extends ChangeNotifier {
 
     // Extract from block elements to avoid missing text
     final paragraphs = <String>[];
-    final pElements = body.querySelectorAll(
+    final allElements = body.querySelectorAll(
       'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
     );
+    // Filter out ancestor elements so wrapper divs don't duplicate child text
+    final pElements = _filterToLeafBlocks(allElements.toList());
 
     for (final p in pElements) {
       final text = p.text.trim();
@@ -444,9 +467,11 @@ class ReaderNotifier extends ChangeNotifier {
     final body = document.body;
     if (body == null) return htmlContent;
 
-    final pElements = body.querySelectorAll(
+    final allElements = body.querySelectorAll(
       'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
     );
+    // Filter out ancestor elements so wrapper divs don't get separate indices
+    final pElements = _filterToLeafBlocks(allElements.toList());
     int paraIndex = 0;
 
     for (final p in pElements) {
@@ -566,9 +591,11 @@ class ReaderNotifier extends ChangeNotifier {
     if (body == null) return htmlContent;
 
     // Index block elements consistently with extractStructuredText()
-    final pElements = body.querySelectorAll(
+    final allElements = body.querySelectorAll(
       'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
     );
+    // Filter out ancestor elements so wrapper divs don't get separate indices
+    final pElements = _filterToLeafBlocks(allElements.toList());
     int paragraphIndex = 0;
 
     for (final p in pElements) {
