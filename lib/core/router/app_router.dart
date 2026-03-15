@@ -11,10 +11,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../features/reader/data/services/epub_service.dart';
 import '../../features/library/data/services/library_service.dart';
 import '../../features/reader/data/services/highlight_service.dart';
+import '../../features/reader/data/services/bookmark_service.dart';
 import '../../features/tts/data/services/tts_service.dart';
 import '../../features/tts/data/services/velum_audio_handler.dart';
 import '../../features/reader/presentation/providers/reader_notifier.dart';
 import '../../features/reader/presentation/providers/highlight_notifier.dart';
+import '../../features/reader/presentation/providers/bookmark_notifier.dart';
 import '../../features/tts/presentation/providers/tts_notifier.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
@@ -61,6 +63,10 @@ GoRouter createAppRouter(LibraryNotifier libraryNotifier) {
               ChangeNotifierProvider(
                 create: (context) =>
                     HighlightNotifier(context.read<HighlightService>()),
+              ),
+              ChangeNotifierProvider(
+                create: (context) =>
+                    BookmarkNotifier(context.read<BookmarkService>()),
               ),
               ChangeNotifierProvider(
                 create: (context) {

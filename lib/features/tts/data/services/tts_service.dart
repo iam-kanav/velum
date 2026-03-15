@@ -235,7 +235,10 @@ class TtsService {
 
   /// Synthesize all chunk texts in the background, reporting progress.
   /// Runs up to [concurrency] requests in parallel.
-  void synthesizeAll(List<String> texts, {int concurrency = 3}) {
+  /// [startFrom] reorders synthesis to prioritise chunks from that index
+  /// onward (wrapping around to the beginning), so playback starting
+  /// mid-chapter doesn't wait for earlier chunks.
+  void synthesizeAll(List<String> texts, {int concurrency = 3, int startFrom = 0}) {
     _batchTotal = texts.length;
     // Count how many are already cached
     _batchDone = texts.where((t) => _cache.get(_cacheKey(t)) != null).length;
@@ -243,8 +246,14 @@ class TtsService {
 
     if (_batchDone >= _batchTotal) return;
 
-    // Collect texts that still need synthesis
-    final pending = texts.where((t) => _cache.get(_cacheKey(t)) == null).toList();
+    // Reorder: startFrom → end, then 0 → startFrom
+    final ordered = <String>[
+      ...texts.sublist(startFrom.clamp(0, texts.length)),
+      if (startFrom > 0) ...texts.sublist(0, startFrom.clamp(0, texts.length)),
+    ];
+
+    // Collect texts that still need synthesis (in priority order)
+    final pending = ordered.where((t) => _cache.get(_cacheKey(t)) == null).toList();
 
     // Process with limited concurrency
     var running = 0;

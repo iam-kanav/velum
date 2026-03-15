@@ -1,3 +1,16 @@
+// Intercept link clicks and open externally via Flutter
+document.addEventListener('click', function(e) {
+  var anchor = e.target.closest('a[href]');
+  if (anchor) {
+    var href = anchor.getAttribute('href');
+    if (href && (href.startsWith('http://') || href.startsWith('https://'))) {
+      e.preventDefault();
+      e.stopPropagation();
+      ReaderChannel.postMessage('open-url:' + href);
+    }
+  }
+}, true);
+
 // Track for double-tap detection
 var lastTapTime = 0;
 var lastTapTarget = null;
@@ -84,7 +97,7 @@ window.ttsHighlightParagraph = function(index) {
   var el = document.querySelector('[data-para="' + index + '"]');
   if (el) {
     el.classList.add('tts-highlight');
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 };
 
@@ -97,7 +110,7 @@ window.ttsHighlightSentence = function(paraIndex, sentIndex) {
   var el = document.querySelector('[data-para="' + paraIndex + '"][data-sent="' + sentIndex + '"]');
   if (el) {
     el.classList.add('tts-highlight');
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } else {
     // Fallback to paragraph highlight if no sentence span found
     window.ttsHighlightParagraph(paraIndex);
@@ -292,6 +305,6 @@ window.restoreHighlights = function(highlightsJson) {
 window.scrollToHighlight = function(hlId) {
   var el = document.querySelector('mark[data-hl-id="' + hlId + '"]');
   if (el) {
-    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   }
 };

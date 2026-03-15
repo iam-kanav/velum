@@ -57,6 +57,29 @@ enum ReaderFont {
   const ReaderFont(this.fontFamily);
 }
 
+enum TextAlignment {
+  left,
+  justify;
+
+  String get cssValue {
+    switch (this) {
+      case TextAlignment.left:
+        return 'left';
+      case TextAlignment.justify:
+        return 'justify';
+    }
+  }
+
+  String get displayName {
+    switch (this) {
+      case TextAlignment.left:
+        return 'Left';
+      case TextAlignment.justify:
+        return 'Justify';
+    }
+  }
+}
+
 class ReaderSettings extends Equatable {
   final ReaderTheme
   appTheme; // Theme for app UI (Library, Settings, Reader overlays)
@@ -68,6 +91,8 @@ class ReaderSettings extends Equatable {
   final double fontSize;
   final double lineHeight;
   final double paragraphSpacing;
+  final TextAlignment textAlignment;
+  final double horizontalMargin; // 0.0 – 40.0 px
 
   const ReaderSettings({
     this.appTheme = ReaderTheme.light,
@@ -78,6 +103,8 @@ class ReaderSettings extends Equatable {
     this.fontSize = 18.0,
     this.lineHeight = 1.6,
     this.paragraphSpacing = 1.2,
+    this.textAlignment = TextAlignment.left,
+    this.horizontalMargin = 20.0,
   });
 
   // Convenience getter for backward compatibility
@@ -92,6 +119,8 @@ class ReaderSettings extends Equatable {
     double? fontSize,
     double? lineHeight,
     double? paragraphSpacing,
+    TextAlignment? textAlignment,
+    double? horizontalMargin,
   }) {
     return ReaderSettings(
       appTheme: appTheme ?? this.appTheme,
@@ -102,6 +131,8 @@ class ReaderSettings extends Equatable {
       fontSize: fontSize ?? this.fontSize,
       lineHeight: lineHeight ?? this.lineHeight,
       paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
+      textAlignment: textAlignment ?? this.textAlignment,
+      horizontalMargin: horizontalMargin ?? this.horizontalMargin,
     );
   }
 
@@ -115,5 +146,7 @@ class ReaderSettings extends Equatable {
     fontSize,
     lineHeight,
     paragraphSpacing,
+    textAlignment,
+    horizontalMargin,
   ];
 }

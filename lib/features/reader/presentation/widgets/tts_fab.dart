@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../settings/data/models/reader_settings.dart';
 import '../providers/reader_notifier.dart';
 import '../../../tts/presentation/providers/tts_notifier.dart';
@@ -32,6 +33,7 @@ class TtsFab extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    final isPlaying = ttsNotifier.isPlaying;
     final isSynthesizing = ttsNotifier.isSynthesizing;
     final progress = ttsNotifier.synthesisProgress;
     final percent = (progress * 100).round();
@@ -54,21 +56,22 @@ class TtsFab extends StatelessWidget {
               foregroundColor: Colors.white,
               elevation: 4,
               onPressed: () async {
-                if (ttsNotifier.isPlaying) {
-                  ttsNotifier.pause();
-                } else if (ttsNotifier.isPaused) {
-                  await ttsNotifier.togglePlayPause();
+                HapticFeedback.lightImpact();
+                if (isPlaying) {
+                  await ttsNotifier.pause();
+                } else if (ttsNotifier.chunks.isNotEmpty) {
+                  // Content already loaded — just resume/play
+                  await ttsNotifier.play();
                 } else {
+                  // First time — load content then play
                   final text = readerNotifier.extractStructuredText();
                   if (text.isNotEmpty) {
                     ttsNotifier.loadContent(text);
-                    await ttsNotifier.togglePlayPause();
+                    await ttsNotifier.play();
                   }
                 }
               },
-              child: Icon(
-                ttsNotifier.isPlaying ? Icons.pause : Icons.play_arrow,
-              ),
+              child: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
             ),
             // Percentage pill — bottom-right of FAB
             if (isSynthesizing)

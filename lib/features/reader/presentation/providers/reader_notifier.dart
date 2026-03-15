@@ -8,6 +8,17 @@ import 'package:html/parser.dart' as html_parser;
 import '../../data/services/epub_service.dart';
 import '../../../library/data/services/library_service.dart';
 
+/// Determine MIME type from filename (used in isolate).
+String _getMimeTypeFromName(String fileName) {
+  final lower = fileName.toLowerCase();
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.gif')) return 'image/gif';
+  if (lower.endsWith('.svg')) return 'image/svg+xml';
+  if (lower.endsWith('.webp')) return 'image/webp';
+  return 'image/png';
+}
+
 class GlobalSearchResult {
   final int chapterIndex;
   final String chapterTitle;
@@ -89,6 +100,12 @@ class ReaderNotifier extends ChangeNotifier {
   final EpubService _epubService;
   final LibraryService _libraryService;
 
+  /// Pre-compiled regex for matching image src attributes — avoids recompilation per call.
+  static final RegExp _srcRegex = RegExp(
+    r'''src=["']([^"']+)["']''',
+    caseSensitive: false,
+  );
+
   ReaderNotifier(this._epubService, this._libraryService);
 
   String? _currentBookPath;
@@ -109,6 +126,9 @@ class ReaderNotifier extends ChangeNotifier {
   Map<String, String> _imageDataUrls = {};
   Map<String, String> get imageDataUrls => _imageDataUrls;
 
+  // Normalized key lookup map for O(1) image matching
+  Map<String, String> _normalizedImageLookup = {};
+
   // Performance: cache processed HTML to avoid expensive re-parsing on every widget rebuild
   String? _cachedChapterHtml;
   String? _cachedProcessedHtml;
@@ -117,6 +137,7 @@ class ReaderNotifier extends ChangeNotifier {
     _isLoading = true;
     _errorMessage = null;
     _imageDataUrls = {};
+    _normalizedImageLookup = {};
     _cachedChapterHtml = null;
     _cachedProcessedHtml = null;
     _currentBookPath = assetPath;
@@ -189,24 +210,17 @@ class ReaderNotifier extends ChangeNotifier {
       final imageContent = entry.value;
 
       if (imageContent.Content != null) {
-        // Determine MIME type from filename
-        final mimeType = _getMimeType(fileName);
-
-        // Convert to base64 data URL
+        final mimeType = _getMimeTypeFromName(fileName);
         final base64Data = base64Encode(imageContent.Content!);
         final dataUrl = 'data:$mimeType;base64,$base64Data';
 
-        // Store with various key formats for matching
         _imageDataUrls[fileName] = dataUrl;
 
-        // Also store with just the filename (no path)
         final justFileName = fileName.split('/').last;
         _imageDataUrls[justFileName] = dataUrl;
 
-        // Store without extension variations
         if (fileName.contains('/')) {
           final pathParts = fileName.split('/');
-          // Store the last two parts (e.g., "images/cover.jpg")
           if (pathParts.length >= 2) {
             _imageDataUrls['${pathParts[pathParts.length - 2]}/${pathParts.last}'] =
                 dataUrl;
@@ -215,23 +229,9 @@ class ReaderNotifier extends ChangeNotifier {
       }
     }
 
+    // Build normalized lookup map for O(1) matching
+    _normalizedImageLookup = _buildNormalizedLookup(_imageDataUrls);
     debugPrint('Cached ${_imageDataUrls.length} image data URLs');
-  }
-
-  String _getMimeType(String fileName) {
-    final lower = fileName.toLowerCase();
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-      return 'image/jpeg';
-    } else if (lower.endsWith('.png')) {
-      return 'image/png';
-    } else if (lower.endsWith('.gif')) {
-      return 'image/gif';
-    } else if (lower.endsWith('.svg')) {
-      return 'image/svg+xml';
-    } else if (lower.endsWith('.webp')) {
-      return 'image/webp';
-    }
-    return 'image/png'; // Default
   }
 
   /// Process HTML content to replace image sources with base64 data URLs
@@ -242,16 +242,7 @@ class ReaderNotifier extends ChangeNotifier {
     var processed = htmlContent;
 
     // Replace image sources with data URLs
-    // Match src="..." or src='...'
-    final srcRegex = RegExp(
-      r'src=["'
-      ']([^"'
-      ']+)["'
-      ']',
-      caseSensitive: false,
-    );
-
-    processed = processed.replaceAllMapped(srcRegex, (match) {
+    processed = processed.replaceAllMapped(_srcRegex, (match) {
       final originalSrc = match.group(1) ?? '';
 
       // Try to find matching image in our cache
@@ -268,6 +259,24 @@ class ReaderNotifier extends ChangeNotifier {
     return processed;
   }
 
+  /// Build a secondary lookup map keyed by normalized filenames for O(1) matching.
+  static Map<String, String> _buildNormalizedLookup(Map<String, String> imageDataUrls) {
+    final lookup = <String, String>{};
+    for (final entry in imageDataUrls.entries) {
+      final key = entry.key;
+      final dataUrl = entry.value;
+      // Store with cleaned-up keys (no leading ../)
+      var clean = key;
+      while (clean.startsWith('../')) {
+        clean = clean.substring(3);
+      }
+      lookup[clean] = dataUrl;
+      // Store just the filename
+      lookup[key.split('/').last.toLowerCase()] = dataUrl;
+    }
+    return lookup;
+  }
+
   String? _findImageDataUrl(String src) {
     // Direct match
     if (_imageDataUrls.containsKey(src)) {
@@ -282,18 +291,14 @@ class ReaderNotifier extends ChangeNotifier {
     if (_imageDataUrls.containsKey(cleanSrc)) {
       return _imageDataUrls[cleanSrc];
     }
-
-    // Try just the filename
-    final justFileName = src.split('/').last;
-    if (_imageDataUrls.containsKey(justFileName)) {
-      return _imageDataUrls[justFileName];
+    if (_normalizedImageLookup.containsKey(cleanSrc)) {
+      return _normalizedImageLookup[cleanSrc];
     }
 
-    // Try matching the last part of the path
-    for (final key in _imageDataUrls.keys) {
-      if (key.endsWith(justFileName) || src.endsWith(key.split('/').last)) {
-        return _imageDataUrls[key];
-      }
+    // Try just the filename (case-insensitive via normalized lookup)
+    final justFileName = src.split('/').last.toLowerCase();
+    if (_normalizedImageLookup.containsKey(justFileName)) {
+      return _normalizedImageLookup[justFileName];
     }
 
     return null;

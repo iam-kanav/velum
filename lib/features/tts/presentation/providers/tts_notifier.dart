@@ -53,6 +53,8 @@ class TtsNotifier extends ChangeNotifier {
   List<String> get availableLanguages => _ttsService.availableLanguages;
   List<dynamic> get availableVoices => _ttsService.availableVoices;
 
+  Timer? _settingsDebounce;
+
   TtsNotifier(this._ttsService, this._prefs);
 
   /// Initialize TTS and load saved settings
@@ -175,14 +177,18 @@ class TtsNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Load text content for TTS and start synthesizing the whole chapter
-  void loadContent(String text) {
+  /// Load text content for TTS and start synthesizing the whole chapter.
+  /// [startFromChunk] prioritises synthesis from that chunk index onward.
+  void loadContent(String text, {int startFromChunk = 0}) {
     _chunks = TtsService.chunkText(text, _settings.highlightMode);
-    _currentChunkIndex = 0;
+    _currentChunkIndex = startFromChunk.clamp(0, _chunks.length - 1).clamp(0, _chunks.length);
 
-    // Pre-synthesize all chunks in the chapter with limited concurrency
+    // Pre-synthesize all chunks, prioritising from current position
     if (_chunks.isNotEmpty) {
-      _ttsService.synthesizeAll(_chunks.map((c) => c.text).toList());
+      _ttsService.synthesizeAll(
+        _chunks.map((c) => c.text).toList(),
+        startFrom: _currentChunkIndex,
+      );
     }
 
     notifyListeners();
@@ -201,8 +207,13 @@ class TtsNotifier extends ChangeNotifier {
   Future<void> play() async {
     if (_chunks.isEmpty) return;
 
-    if (_state == TtsState.paused) {
-      // Proper resume from paused position
+    final wasPaused = _state == TtsState.paused;
+
+    // Update state immediately so the UI reflects the change instantly
+    _state = TtsState.playing;
+    notifyListeners();
+
+    if (wasPaused) {
       await _ttsService.resume();
     } else {
       await _speakCurrentChunk();
@@ -211,16 +222,17 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Pause playback
   Future<void> pause() async {
-    await _ttsService.pause();
+    // Update state immediately so the UI reflects the change instantly
     _state = TtsState.paused;
     notifyListeners();
+    await _ttsService.pause();
   }
 
   /// Stop playback (preserves position so resume picks up where we left off)
   Future<void> stop() async {
-    await _ttsService.stop();
     _state = TtsState.stopped;
     notifyListeners();
+    await _ttsService.stop();
   }
 
   /// Toggle play/pause
@@ -241,6 +253,11 @@ class TtsNotifier extends ChangeNotifier {
     if (chunkIndex >= 0) {
       await _ttsService.stop();
       _currentChunkIndex = chunkIndex;
+      // Re-prioritize synthesis from the new position
+      _ttsService.synthesizeAll(
+        _chunks.map((c) => c.text).toList(),
+        startFrom: chunkIndex,
+      );
       await _speakCurrentChunk();
       notifyListeners();
     }
@@ -257,6 +274,11 @@ class TtsNotifier extends ChangeNotifier {
     if (chunkIndex >= 0) {
       await _ttsService.stop();
       _currentChunkIndex = chunkIndex;
+      // Re-prioritize synthesis from the new position
+      _ttsService.synthesizeAll(
+        _chunks.map((c) => c.text).toList(),
+        startFrom: chunkIndex,
+      );
       await _speakCurrentChunk();
       notifyListeners();
     } else {
@@ -297,26 +319,33 @@ class TtsNotifier extends ChangeNotifier {
     }
   }
 
+  /// Debounced apply + save for slider-driven settings (speech rate, pitch, volume).
+  /// Updates UI immediately but delays the expensive applySettings + persist calls.
+  void _debouncedApplyAndSave() {
+    _settingsDebounce?.cancel();
+    _settingsDebounce = Timer(const Duration(milliseconds: 300), () async {
+      await _ttsService.applySettings(_settings);
+      await _saveSettings();
+    });
+  }
+
   // Settings update methods
-  Future<void> updateSpeechRate(double rate) async {
+  void updateSpeechRate(double rate) {
     _settings = _settings.copyWith(speechRate: rate.clamp(0.0, 2.0));
-    await _ttsService.applySettings(_settings);
-    await _saveSettings();
     notifyListeners();
+    _debouncedApplyAndSave();
   }
 
-  Future<void> updatePitch(double pitch) async {
+  void updatePitch(double pitch) {
     _settings = _settings.copyWith(pitch: pitch.clamp(0.5, 2.0));
-    await _ttsService.applySettings(_settings);
-    await _saveSettings();
     notifyListeners();
+    _debouncedApplyAndSave();
   }
 
-  Future<void> updateVolume(double volume) async {
+  void updateVolume(double volume) {
     _settings = _settings.copyWith(volume: volume.clamp(0.0, 1.0));
-    await _ttsService.applySettings(_settings);
-    await _saveSettings();
     notifyListeners();
+    _debouncedApplyAndSave();
   }
 
   Future<void> updateLanguage(String language) async {
@@ -379,6 +408,15 @@ class TtsNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Preview the current voice with a short sample sentence.
+  Future<void> previewVoice() async {
+    await _ttsService.applySettings(_settings);
+    await _ttsService.speak('The quick brown fox jumps over the lazy dog.');
+    // Wait for playback to finish
+    await Future.delayed(const Duration(seconds: 3));
+    await _ttsService.stop();
+  }
+
   /// Get voices filtered by current language
   List<Map<String, dynamic>> getVoicesForCurrentLanguage() {
     return _ttsService.getVoicesForLanguage(_settings.language).map((v) => {
@@ -391,8 +429,12 @@ class TtsNotifier extends ChangeNotifier {
 
   @override
   void dispose() {
+    _settingsDebounce?.cancel();
     _audioInterruptionSub?.cancel();
-    _ttsService.dispose();
+    // Stop playback and clear cache, but do NOT dispose the shared TtsService —
+    // it outlives this notifier and will be reused on the next Reader visit.
+    _ttsService.stop();
+    _ttsService.clearCache();
     super.dispose();
   }
 }

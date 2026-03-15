@@ -407,6 +407,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     return shortName;
   }
 
+  bool _isPreviewing = false;
+
   Widget _buildVoiceDropdown(TtsNotifier ttsNotifier) {
     final allVoices = ttsNotifier.getVoicesForCurrentLanguage();
     final settings = ttsNotifier.settings;
@@ -449,51 +451,98 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         ? settings.voiceName
         : null;
 
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Voice',
-          style: TextStyle(
-            color: widget.textColor.withAlpha(200),
-            fontSize: 14,
-          ),
-        ),
-        Container(
-          constraints: const BoxConstraints(maxWidth: 180),
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          decoration: BoxDecoration(
-            border: Border.all(color: widget.textColor.withAlpha(60)),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: DropdownButton<String>(
-            value: currentVoice,
-            hint: Text(
-              'Default',
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Voice',
               style: TextStyle(
-                color: widget.textColor.withAlpha(150),
-                fontSize: 13,
+                color: widget.textColor.withAlpha(200),
+                fontSize: 14,
               ),
             ),
-            items: voices
-                .map(
-                  (voice) => DropdownMenuItem<String>(
-                    value: voice['name'] as String,
-                    child: Text(
-                      _voiceDisplayName(voice),
-                      style: TextStyle(color: widget.textColor, fontSize: 13),
-                    ),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  constraints: const BoxConstraints(maxWidth: 150),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: widget.textColor.withAlpha(60)),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                )
-                .toList(),
-            onChanged: (val) {
-              if (val != null) ttsNotifier.updateVoice(val);
-            },
-            underline: const SizedBox(),
-            dropdownColor: widget.backgroundColor,
-            icon: Icon(Icons.arrow_drop_down, color: widget.textColor),
-            isExpanded: true,
-          ),
+                  child: DropdownButton<String>(
+                    value: currentVoice,
+                    hint: Text(
+                      'Default',
+                      style: TextStyle(
+                        color: widget.textColor.withAlpha(150),
+                        fontSize: 13,
+                      ),
+                    ),
+                    items: voices
+                        .map(
+                          (voice) => DropdownMenuItem<String>(
+                            value: voice['name'] as String,
+                            child: Text(
+                              _voiceDisplayName(voice),
+                              style: TextStyle(color: widget.textColor, fontSize: 13),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (val) {
+                      if (val != null) ttsNotifier.updateVoice(val);
+                    },
+                    underline: const SizedBox(),
+                    dropdownColor: widget.backgroundColor,
+                    icon: Icon(Icons.arrow_drop_down, color: widget.textColor),
+                    isExpanded: true,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Voice preview button
+                GestureDetector(
+                  onTap: _isPreviewing
+                      ? null
+                      : () async {
+                          setState(() => _isPreviewing = true);
+                          try {
+                            // Temporarily speak preview text using current settings
+                            final wasPlaying = ttsNotifier.isPlaying;
+                            if (wasPlaying) await ttsNotifier.pause();
+                            await ttsNotifier.previewVoice();
+                            if (wasPlaying) await ttsNotifier.play();
+                          } finally {
+                            if (mounted) setState(() => _isPreviewing = false);
+                          }
+                        },
+                  child: Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: _accentGreen.withAlpha(20),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _accentGreen.withAlpha(60)),
+                    ),
+                    child: _isPreviewing
+                        ? SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: _accentGreen,
+                            ),
+                          )
+                        : Icon(Icons.volume_up, size: 16, color: _accentGreen),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ],
     );

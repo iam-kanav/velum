@@ -12,17 +12,20 @@ import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
 import 'package:velum/features/settings/presentation/widgets/settings_modal.dart';
 import 'package:velum/features/tts/presentation/providers/tts_notifier.dart';
+import 'package:velum/features/tts/data/services/tts_service.dart';
 import 'package:velum/features/tts/data/models/tts_settings.dart';
 import 'package:velum/features/tts/data/services/velum_audio_handler.dart';
 import 'package:velum/core/widgets/banner_ad_widget.dart';
 import 'package:velum/core/providers/ad_notifier.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/models/highlight.dart';
+import '../../data/models/bookmark.dart';
 import '../providers/highlight_notifier.dart';
+import '../providers/bookmark_notifier.dart';
 import '../widgets/contents_modal.dart';
 import '../widgets/highlights_modal.dart';
 
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show HapticFeedback, rootBundle;
 import 'package:velum/features/reader/presentation/widgets/color_picker_bar.dart';
 import 'package:velum/features/reader/presentation/widgets/global_search_overlay.dart';
 import 'package:velum/features/reader/presentation/widgets/book_complete_overlay.dart';
@@ -85,6 +88,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   TtsNotifier? _ttsNotifier;
   ReaderNotifier? _readerNotifier;
   HighlightNotifier? _highlightNotifier;
+  BookmarkNotifier? _bookmarkNotifier;
 
   @override
   void initState() {
@@ -111,6 +115,10 @@ class _ReaderScreenState extends State<ReaderScreen>
       _highlightNotifier = context.read<HighlightNotifier>();
       _highlightNotifier!.loadHighlights(widget.assetPath);
       _highlightNotifier!.addListener(_onHighlightChanged);
+
+      // Load bookmarks for this book
+      _bookmarkNotifier = context.read<BookmarkNotifier>();
+      _bookmarkNotifier!.loadBookmarks(widget.assetPath);
 
       // Set up TTS callbacks and listener for highlight updates
       _ttsNotifier = context.read<TtsNotifier>();
@@ -184,12 +192,17 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
   }
 
+  /// Sanitize a string to only allow UUID characters (alphanumeric + hyphens).
+  static final RegExp _uuidSanitizer = RegExp(r'[^a-zA-Z0-9\-]');
+  String _sanitizeId(String id) => id.replaceAll(_uuidSanitizer, '');
+
   /// Listener for highlight changes — removes deleted highlights from the WebView.
   void _onHighlightChanged() {
     final removedId = _highlightNotifier?.lastRemovedHighlightId;
     if (removedId != null && _isPageReady) {
       _highlightNotifier!.clearLastRemoved();
-      _controller.runJavaScript("window.removeHighlight('$removedId');");
+      final safeId = _sanitizeId(removedId);
+      _controller.runJavaScript("window.removeHighlight('$safeId');");
     }
   }
 
@@ -260,8 +273,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     final sameChapter = result.chapterIndex == notifier.currentChapterIndex;
     if (sameChapter) {
       // Scroll to position in current chapter
+      final safePct = result.positionPercent.clamp(0.0, 1.0);
       _controller.runJavaScript(
-        'window.scrollTo(0, document.body.scrollHeight * ${result.positionPercent});',
+        'window.scrollTo(0, document.body.scrollHeight * $safePct);',
       );
     } else {
       // Jump to the target chapter, scroll after it loads
@@ -370,6 +384,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               notifier.toggleUI();
               break;
             case 'next':
+              HapticFeedback.mediumImpact();
               final chapterBefore = notifier.currentChapter;
               notifier.nextChapter();
               if (notifier.currentChapter == chapterBefore) {
@@ -382,16 +397,22 @@ class _ReaderScreenState extends State<ReaderScreen>
               }
               break;
             case 'prev':
+              HapticFeedback.mediumImpact();
               _animatePageTurn(1); // Slide right
               notifier.previousChapter();
               context.read<TtsNotifier>().stop();
               context.read<TtsNotifier>().clearContent();
               break;
             default:
+              // Handle external URL opening
+              if (message.message.startsWith('open-url:')) {
+                final url = message.message.substring(9);
+                _openExternalUrl(url);
+              }
               // Handle scroll position message
-              if (message.message.startsWith('scroll:')) {
-                _savedScrollPosition =
-                    double.tryParse(message.message.substring(7)) ?? 0;
+              else if (message.message.startsWith('scroll:')) {
+                final parsed = double.tryParse(message.message.substring(7));
+                if (parsed != null) _savedScrollPosition = parsed;
               }
               // Handle text selection for highlighting
               else if (message.message.startsWith('selection:')) {
@@ -431,7 +452,24 @@ class _ReaderScreenState extends State<ReaderScreen>
                   if (ttsNotifier.chunks.isEmpty) {
                     final text = readerNotifier.extractStructuredText();
                     if (text.isNotEmpty) {
-                      ttsNotifier.loadContent(text);
+                      // Find the chunk index for the tapped paragraph so
+                      // synthesis starts from there, not from the top.
+                      final chunks = TtsService.chunkText(
+                        text,
+                        ttsNotifier.settings.highlightMode,
+                      );
+                      int startChunk = 0;
+                      if (sentIndex != null) {
+                        startChunk = chunks.indexWhere(
+                          (c) => c.paragraphIndex == paraIndex && c.sentenceIndex == sentIndex,
+                        );
+                      }
+                      if (startChunk < 0) {
+                        startChunk = chunks.indexWhere(
+                          (c) => c.paragraphIndex == paraIndex,
+                        );
+                      }
+                      ttsNotifier.loadContent(text, startFromChunk: startChunk.clamp(0, chunks.length));
                     }
                   }
 
@@ -448,6 +486,15 @@ class _ReaderScreenState extends State<ReaderScreen>
       )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onNavigationRequest: (NavigationRequest request) {
+            // Allow the initial data: URI content load
+            if (request.url.startsWith('data:')) {
+              return NavigationDecision.navigate;
+            }
+            // Block all other URLs from loading in the WebView.
+            // The JS click interceptor opens them externally.
+            return NavigationDecision.prevent;
+          },
           onPageFinished: (String url) async {
             // Load and inject JS from asset
             final jsString = await rootBundle.loadString('assets/js/reader.js');
@@ -458,14 +505,15 @@ class _ReaderScreenState extends State<ReaderScreen>
             _restoreHighlights();
             // Restore scroll position after page loads
             if (_shouldRestoreScroll && _savedScrollPosition > 0) {
+              final safeScroll = _savedScrollPosition.toInt();
               _controller.runJavaScript(
-                'window.scrollTo(0, $_savedScrollPosition);',
+                'window.scrollTo(0, $safeScroll);',
               );
               _shouldRestoreScroll = false;
             }
             // Scroll to a pending highlight if navigated from highlights modal
             if (_pendingScrollHighlightId != null) {
-              final hlId = _pendingScrollHighlightId!;
+              final hlId = _sanitizeId(_pendingScrollHighlightId!);
               _pendingScrollHighlightId = null;
               // Small delay to let restoreHighlights finish rendering
               Future.delayed(const Duration(milliseconds: 300), () {
@@ -474,7 +522,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             }
             // Scroll to position from global search result
             if (_pendingScrollPercent != null) {
-              final pct = _pendingScrollPercent!;
+              final pct = _pendingScrollPercent!.clamp(0.0, 1.0);
               _pendingScrollPercent = null;
               Future.delayed(const Duration(milliseconds: 300), () {
                 _controller.runJavaScript(
@@ -616,6 +664,29 @@ class _ReaderScreenState extends State<ReaderScreen>
                         ),
                         centerTitle: true,
                         actions: [
+                          // Bookmark current position
+                          IconButton(
+                            icon: Icon(
+                              Icons.bookmark_add_outlined,
+                              color: readerTheme.textColor,
+                            ),
+                            tooltip: 'Add Bookmark',
+                            onPressed: () {
+                              HapticFeedback.lightImpact();
+                              context.read<BookmarkNotifier>().addBookmark(
+                                chapterIndex: notifier.currentChapterIndex,
+                                scrollPosition: _savedScrollPosition,
+                                label: notifier.currentChapter?.Title,
+                              );
+                              ScaffoldMessenger.of(context).clearSnackBars();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Bookmark added'),
+                                  duration: Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                          ),
                           IconButton(
                             icon: Icon(
                               Icons.search,
@@ -630,90 +701,130 @@ class _ReaderScreenState extends State<ReaderScreen>
                     // Layer 3: Bottom Bar (Animated) - Uses Reader Theme
                     AnimatedPositioned(
                       duration: const Duration(milliseconds: 200),
-                      bottom: showUI ? 0 : -80,
+                      bottom: showUI ? 0 : -82,
                       left: 0,
                       right: 0,
-                      height: 80,
+                      height: 82,
                       child: Container(
                         color: readerTheme.backgroundColor.withAlpha(
                           (0.95 * 255).round(),
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 20),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
-                            // Highlights/bookmarks icon
-                            IconButton(
-                              key: _highlightsIconKey,
-                              icon: Icon(
-                                Icons.bookmark,
-                                color: readerTheme.textColor,
+                            // Reading progress bar
+                            if (notifier.currentBook?.Chapters != null &&
+                                notifier.currentBook!.Chapters!.isNotEmpty)
+                              LinearProgressIndicator(
+                                value: (notifier.currentChapterIndex + 1) /
+                                    notifier.currentBook!.Chapters!.length,
+                                minHeight: 2,
+                                backgroundColor: readerTheme.textColor.withAlpha(20),
+                                valueColor: const AlwaysStoppedAnimation<Color>(_accentGreen),
                               ),
-                              onPressed: () async {
-                                final readerNotif = context.read<ReaderNotifier>();
-                                final highlightNotif = context.read<HighlightNotifier>();
-                                final highlight =
-                                    await showModalBottomSheet<Highlight>(
-                                      context: context,
-                                      backgroundColor: Colors.transparent,
-                                      builder: (_) => MultiProvider(
-                                        providers: [
-                                          ChangeNotifierProvider.value(value: readerNotif),
-                                          ChangeNotifierProvider.value(value: highlightNotif),
-                                        ],
-                                        child: const HighlightsModal(),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              child: SizedBox(
+                                height: 78,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    // Highlights/bookmarks icon
+                                    IconButton(
+                                      key: _highlightsIconKey,
+                                      icon: Icon(
+                                        Icons.bookmark,
+                                        color: readerTheme.textColor,
                                       ),
-                                    );
-                                if (highlight != null && mounted) {
-                                  _navigateToHighlight(highlight, notifier);
-                                }
-                              },
-                            ),
-                            // Tappable chapter name → opens Contents sheet
-                            Expanded(
-                              child: GestureDetector(
-                                key: _chapterNameKey,
-                                onTap: () {
-                                  final readerNotif = context.read<ReaderNotifier>();
-                                  showModalBottomSheet(
-                                    context: context,
-                                    backgroundColor: Colors.transparent,
-                                    builder: (_) => ChangeNotifierProvider.value(
-                                      value: readerNotif,
-                                      child: const ContentsModal(),
+                                      onPressed: () async {
+                                        final readerNotif = context.read<ReaderNotifier>();
+                                        final highlightNotif = context.read<HighlightNotifier>();
+                                        final bmNotif = context.read<BookmarkNotifier>();
+                                        final result =
+                                            await showModalBottomSheet<dynamic>(
+                                              context: context,
+                                              backgroundColor: Colors.transparent,
+                                              builder: (_) => MultiProvider(
+                                                providers: [
+                                                  ChangeNotifierProvider.value(value: readerNotif),
+                                                  ChangeNotifierProvider.value(value: highlightNotif),
+                                                  ChangeNotifierProvider.value(value: bmNotif),
+                                                ],
+                                                child: const HighlightsModal(),
+                                              ),
+                                            );
+                                        if (result != null && mounted) {
+                                          if (result is Highlight) {
+                                            _navigateToHighlight(result, notifier);
+                                          } else if (result is Bookmark) {
+                                            _navigateToBookmark(result, notifier);
+                                          }
+                                        }
+                                      },
                                     ),
-                                  );
-                                },
-                                child: Text(
-                                  notifier.currentChapter?.Title ?? '',
-                                  textAlign: TextAlign.center,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: readerTheme.textColor,
-                                  ),
+                                    // Tappable chapter name + progress → opens Contents sheet
+                                    Expanded(
+                                      child: GestureDetector(
+                                        key: _chapterNameKey,
+                                        onTap: () {
+                                          final readerNotif = context.read<ReaderNotifier>();
+                                          showModalBottomSheet(
+                                            context: context,
+                                            backgroundColor: Colors.transparent,
+                                            builder: (_) => ChangeNotifierProvider.value(
+                                              value: readerNotif,
+                                              child: const ContentsModal(),
+                                            ),
+                                          );
+                                        },
+                                        child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Text(
+                                              notifier.currentChapter?.Title ?? '',
+                                              textAlign: TextAlign.center,
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: TextStyle(
+                                                fontSize: 14,
+                                                color: readerTheme.textColor,
+                                              ),
+                                            ),
+                                            if (notifier.currentBook?.Chapters != null &&
+                                                notifier.currentBook!.Chapters!.length > 1)
+                                              Text(
+                                                'Chapter ${notifier.currentChapterIndex + 1} of ${notifier.currentBook!.Chapters!.length}',
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  color: readerTheme.textColor.withAlpha(120),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    // Settings icon
+                                    IconButton(
+                                      key: _settingsIconKey,
+                                      icon: Icon(
+                                        Icons.settings,
+                                        color: readerTheme.textColor,
+                                      ),
+                                      onPressed: () {
+                                        final ttsNotif = context.read<TtsNotifier>();
+                                        showModalBottomSheet(
+                                          context: context,
+                                          backgroundColor: Colors.transparent,
+                                          builder: (_) => ChangeNotifierProvider.value(
+                                            value: ttsNotif,
+                                            child: const SettingsModal(),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ],
                                 ),
                               ),
-                            ),
-                            // Settings icon
-                            IconButton(
-                              key: _settingsIconKey,
-                              icon: Icon(
-                                Icons.settings,
-                                color: readerTheme.textColor,
-                              ),
-                              onPressed: () {
-                                final ttsNotif = context.read<TtsNotifier>();
-                                showModalBottomSheet(
-                                  context: context,
-                                  backgroundColor: Colors.transparent,
-                                  builder: (_) => ChangeNotifierProvider.value(
-                                    value: ttsNotif,
-                                    child: const SettingsModal(),
-                                  ),
-                                );
-                              },
                             ),
                           ],
                         ),
@@ -862,6 +973,38 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (notifier.isLoading) {
       return const Center(child: CircularProgressIndicator());
     }
+    if (notifier.errorMessage != null) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+              const SizedBox(height: 16),
+              const Text(
+                "This book couldn't be opened",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'The file may be corrupted or in an unsupported format.',
+                style: TextStyle(fontSize: 13, color: Colors.grey[600]),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                onPressed: () => notifier.loadBook(widget.assetPath),
+                icon: const Icon(Icons.refresh, size: 18),
+                label: const Text('Retry'),
+                style: FilledButton.styleFrom(backgroundColor: _accentGreen),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     if (notifier.currentChapter == null) {
       return const Center(child: Text('Loading content...'));
     }
@@ -881,6 +1024,14 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // _buildTtsFab, _buildColorPicker, _buildBookCompleteScreen extracted to widgets
 
+  /// Open a URL in the device's external browser via Android Intent.
+  void _openExternalUrl(String url) {
+    if (Platform.isAndroid) {
+      Process.run('am', ['start', '-a', 'android.intent.action.VIEW', '-d', url]);
+    }
+    // iOS: use canLaunchUrl / system channel if needed in the future
+  }
+
   void _navigateToHighlight(Highlight highlight, ReaderNotifier notifier) {
     final chapters = notifier.currentBook?.Chapters;
     if (chapters == null) return;
@@ -889,12 +1040,32 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     if (sameChapter) {
       // Already on the right chapter — just scroll
-      _controller.runJavaScript("window.scrollToHighlight('${highlight.id}');");
+      final safeId = _sanitizeId(highlight.id);
+      _controller.runJavaScript("window.scrollToHighlight('$safeId');");
     } else {
       // Different chapter — jump there, then scroll after page loads
       _pendingScrollHighlightId = highlight.id;
       if (highlight.chapterIndex < chapters.length) {
         notifier.jumpToChapter(chapters[highlight.chapterIndex]);
+      }
+    }
+  }
+
+  void _navigateToBookmark(Bookmark bookmark, ReaderNotifier notifier) {
+    final chapters = notifier.currentBook?.Chapters;
+    if (chapters == null) return;
+
+    final sameChapter = bookmark.chapterIndex == notifier.currentChapterIndex;
+    final safeScroll = bookmark.scrollPosition.toInt();
+
+    if (sameChapter) {
+      _controller.runJavaScript('window.scrollTo(0, $safeScroll);');
+    } else {
+      // Jump to the chapter, then scroll after page loads
+      _savedScrollPosition = bookmark.scrollPosition;
+      _shouldRestoreScroll = true;
+      if (bookmark.chapterIndex < chapters.length) {
+        notifier.jumpToChapter(chapters[bookmark.chapterIndex]);
       }
     }
   }
@@ -957,13 +1128,35 @@ class _ReaderScreenState extends State<ReaderScreen>
           final latest = highlights.isNotEmpty ? highlights.last : null;
           if (latest != null) {
             final escapedColor = cssColor.replaceAll("'", "\\'");
+            final safeId = _sanitizeId(latest.id);
             _controller.runJavaScript(
-              "window.applyHighlight($_selectionStartOffset, $_selectionEndOffset, '$escapedColor', '${latest.id}');",
+              "window.applyHighlight($_selectionStartOffset, $_selectionEndOffset, '$escapedColor', '$safeId');",
             );
           }
         });
 
     setState(() => _showColorPicker = false);
+
+    // Show undo SnackBar
+    if (mounted) {
+      ScaffoldMessenger.of(context).clearSnackBars();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Highlight added'),
+          duration: const Duration(seconds: 3),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () {
+              final highlights = highlightNotifier.highlightsForChapter(chapterIndex);
+              if (highlights.isNotEmpty) {
+                final latest = highlights.last;
+                highlightNotifier.removeHighlight(latest.id);
+              }
+            },
+          ),
+        ),
+      );
+    }
   }
 
   bool _isInitialLoad = true;
@@ -1000,6 +1193,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         if (selectedFont.path != _cachedFontPath || _cachedFontBase64 == null) {
           final fontFile = File(selectedFont.path);
           if (fontFile.existsSync()) {
+            // readAsBytesSync is fine here — result is cached after first read
             final fontBytes = fontFile.readAsBytesSync();
             _cachedFontBase64 = base64Encode(fontBytes);
             _cachedFontPath = selectedFont.path;
@@ -1045,8 +1239,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       font-family: '$fontFamily', serif !important;
       font-size: ${settings.fontSize.toInt()}px !important;
       line-height: ${settings.lineHeight} !important;
-      padding: 20px !important;
-      padding-bottom: 80px !important;
+      text-align: ${settings.textAlignment.cssValue} !important;
+      padding: ${(MediaQuery.of(context).padding.top + kToolbarHeight + 8).toInt()}px ${settings.horizontalMargin.toInt()}px 80px !important;
       margin: 0 !important;
       min-height: 100vh !important;
       touch-action: pan-y !important;

@@ -471,6 +471,91 @@ class _SettingsModalState extends State<SettingsModal> {
               );
             },
           ),
+          const SizedBox(height: 16),
+
+          // Text Alignment
+          Text(
+            'Text Alignment',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: readerTheme.textColor,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Consumer<SettingsNotifier>(
+            builder: (context, notifier, _) {
+              return Row(
+                children: TextAlignment.values.map((alignment) {
+                  final isSelected = notifier.settings.textAlignment == alignment;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 10),
+                    child: GestureDetector(
+                      onTap: () => notifier.updateTextAlignment(alignment),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected ? _accentGreen : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: isSelected ? _accentGreen : readerTheme.textColor.withAlpha(60),
+                          ),
+                        ),
+                        child: Text(
+                          alignment.displayName,
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: isSelected ? Colors.white : readerTheme.textColor,
+                            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                          ),
+                        ),
+                      ),
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+
+          // Horizontal Margin Slider
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Margins',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: readerTheme.textColor,
+                ),
+              ),
+              Consumer<SettingsNotifier>(
+                builder: (context, notifier, _) {
+                  return Text(
+                    '${notifier.settings.horizontalMargin.toInt()}px',
+                    style: TextStyle(color: readerTheme.textColor),
+                  );
+                },
+              ),
+            ],
+          ),
+          Consumer<SettingsNotifier>(
+            builder: (context, notifier, _) {
+              return SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: _accentGreen,
+                  inactiveTrackColor: readerTheme.textColor.withAlpha(40),
+                  thumbColor: _accentGreen,
+                ),
+                child: Slider(
+                  value: notifier.settings.horizontalMargin,
+                  min: 0,
+                  max: 40,
+                  divisions: 8,
+                  onChanged: (val) => notifier.updateHorizontalMargin(val),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );

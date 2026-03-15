@@ -13,6 +13,7 @@ import 'features/settings/data/models/reader_settings.dart';
 import 'features/settings/presentation/providers/settings_notifier.dart';
 import 'features/reader/data/services/epub_service.dart';
 import 'features/reader/data/services/highlight_service.dart';
+import 'features/reader/data/services/bookmark_service.dart';
 import 'features/library/data/models/scanned_book.dart';
 import 'features/library/data/services/library_service.dart';
 import 'features/library/presentation/providers/library_notifier.dart';
@@ -42,6 +43,7 @@ void main() async {
   await libraryService.migrateFromSharedPreferencesIfNeeded();
 
   final highlightService = HighlightService(prefs);
+  final bookmarkService = BookmarkService(prefs);
   final ttsService = TtsService();
 
   // Initialize audio_service for media notification controls
@@ -60,6 +62,7 @@ void main() async {
       prefs: prefs,
       libraryService: libraryService,
       highlightService: highlightService,
+      bookmarkService: bookmarkService,
       ttsService: ttsService,
     ),
   );
@@ -69,6 +72,7 @@ class MainApp extends StatelessWidget {
   final SharedPreferences prefs;
   final LibraryService libraryService;
   final HighlightService highlightService;
+  final BookmarkService bookmarkService;
   final TtsService ttsService;
 
   const MainApp({
@@ -76,6 +80,7 @@ class MainApp extends StatelessWidget {
     required this.prefs,
     required this.libraryService,
     required this.highlightService,
+    required this.bookmarkService,
     required this.ttsService,
   });
 
@@ -86,6 +91,7 @@ class MainApp extends StatelessWidget {
         Provider(create: (_) => const EpubService()),
         Provider.value(value: libraryService),
         Provider.value(value: highlightService),
+        Provider.value(value: bookmarkService),
         Provider.value(value: ttsService),
         Provider.value(value: prefs),
         ChangeNotifierProvider(

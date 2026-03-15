@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../settings/data/models/reader_settings.dart';
 import '../providers/reader_notifier.dart';
 
@@ -58,7 +59,10 @@ class ColorPickerBar extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: colors.map((c) {
                 return GestureDetector(
-                  onTap: () => onHighlightSelected(c.$1, c.$2),
+                  onTap: () {
+                    HapticFeedback.lightImpact();
+                    onHighlightSelected(c.$1, c.$2);
+                  },
                   child: Container(
                     width: 36,
                     height: 36,

@@ -7,6 +7,25 @@ class AdService {
   factory AdService() => _instance;
   AdService._internal();
 
+  // Production ad unit IDs from compile-time environment (--dart-define).
+  // Fallback values are test ad unit IDs.
+  static const String _androidBannerEnv = String.fromEnvironment(
+    'AD_BANNER_ANDROID',
+    defaultValue: '',
+  );
+  static const String _iosBannerEnv = String.fromEnvironment(
+    'AD_BANNER_IOS',
+    defaultValue: '',
+  );
+  static const String _androidRewardedEnv = String.fromEnvironment(
+    'AD_REWARDED_ANDROID',
+    defaultValue: '',
+  );
+  static const String _iosRewardedEnv = String.fromEnvironment(
+    'AD_REWARDED_IOS',
+    defaultValue: '',
+  );
+
   Future<void> initialize() async {
     await MobileAds.instance.initialize();
   }
@@ -21,9 +40,13 @@ class AdService {
     }
 
     if (Platform.isAndroid) {
-      return 'ca-app-pub-1274598295446847/3374869571'; // PRODUCTION ID
+      return _androidBannerEnv.isNotEmpty
+          ? _androidBannerEnv
+          : 'ca-app-pub-3940256099942544/6300978111'; // fallback to test
     } else if (Platform.isIOS) {
-      return 'ca-app-pub-1274598295446847/3374869571';
+      return _iosBannerEnv.isNotEmpty
+          ? _iosBannerEnv
+          : 'ca-app-pub-3940256099942544/2934735716'; // fallback to test
     }
     throw UnsupportedError('Unsupported platform');
   }
@@ -38,9 +61,13 @@ class AdService {
     }
 
     if (Platform.isAndroid) {
-      return 'ca-app-pub-1274598295446847/5686172298';
+      return _androidRewardedEnv.isNotEmpty
+          ? _androidRewardedEnv
+          : 'ca-app-pub-3940256099942544/5224354917'; // fallback to test
     } else if (Platform.isIOS) {
-      return 'ca-app-pub-1274598295446847/5686172298';
+      return _iosRewardedEnv.isNotEmpty
+          ? _iosRewardedEnv
+          : 'ca-app-pub-3940256099942544/1712485313'; // fallback to test
     }
     throw UnsupportedError('Unsupported platform');
   }

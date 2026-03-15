@@ -6,6 +6,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive/hive.dart';
 import 'package:epubx/epubx.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 import '../models/scanned_book.dart';
 
 /// Top-level function for compute() — parses EPUB bytes in a background isolate.
@@ -273,27 +276,32 @@ class LibraryService {
         return getSavedBooks();
       }
 
+      // Copy picked files to a persistent app directory with unique names
+      // so multiple versions of the same book don't overwrite each other.
+      final appDir = await getApplicationDocumentsDirectory();
+      final booksDir = Directory(p.join(appDir.path, 'books'));
+      if (!await booksDir.exists()) {
+        await booksDir.create(recursive: true);
+      }
+
       final List<ScannedBook> newBooks = [];
 
       for (final file in result.files) {
         if (file.bytes != null) {
           try {
+            // Save with a UUID prefix to guarantee uniqueness
+            final uniqueName = '${const Uuid().v4()}_${file.name}';
+            final savedFile = File(p.join(booksDir.path, uniqueName));
+            await savedFile.writeAsBytes(file.bytes!);
+
             final book = await compute(_parseEpubInIsolate, (
               file.bytes!,
               file.name,
-              file.path ?? file.name,
+              savedFile.path,
             ));
             newBooks.add(book);
           } catch (e) {
             debugPrint('Failed to parse ${file.name}: $e');
-            newBooks.add(
-              ScannedBook(
-                filePath: file.path ?? file.name,
-                title: file.name.replaceAll('.epub', ''),
-                author: 'Unknown Author',
-                addedAt: DateTime.now(),
-              ),
-            );
           }
         }
       }
@@ -335,6 +343,20 @@ class LibraryService {
   Future<void> removeBook(String filePath) async {
     await _booksBox.delete(filePath);
     await _addToDeletedPaths(filePath);
+
+    // Clean up the copied file if it's in our books directory
+    try {
+      final appDir = await getApplicationDocumentsDirectory();
+      final booksDir = p.join(appDir.path, 'books');
+      if (filePath.startsWith(booksDir)) {
+        final file = File(filePath);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error deleting book file: $e');
+    }
   }
 
   Set<String> _getDeletedPaths() {
