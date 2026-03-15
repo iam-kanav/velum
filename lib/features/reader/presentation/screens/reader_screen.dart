@@ -556,16 +556,14 @@ class _ReaderScreenState extends State<ReaderScreen>
       floatingActionButton: notifier.currentChapter != null
           ? Consumer<TtsNotifier>(
               builder: (context, ttsNotifier, _) {
-                return KeyedSubtree(
-                  key: _fabKey,
-                  child: TtsFab(
-                    ttsNotifier: ttsNotifier,
-                    readerNotifier: notifier,
-                    showUI: showUI,
-                    isOverlayOpen:
-                        _showColorPicker || _showSearch || _showBookComplete,
-                    readerTheme: readerTheme,
-                  ),
+                return TtsFab(
+                  ttsNotifier: ttsNotifier,
+                  readerNotifier: notifier,
+                  showUI: showUI,
+                  isOverlayOpen:
+                      _showColorPicker || _showSearch || _showBookComplete,
+                  readerTheme: readerTheme,
+                  spotlightKey: _fabKey,
                 );
               },
             )

@@ -10,6 +10,10 @@ class TtsFab extends StatelessWidget {
   final bool isOverlayOpen;
   final ReaderTheme readerTheme;
 
+  /// Key placed on the visual FAB group (inside AnimatedSlide) so the
+  /// tutorial spotlight resolves the correct on-screen position.
+  final GlobalKey? spotlightKey;
+
   const TtsFab({
     super.key,
     required this.ttsNotifier,
@@ -17,6 +21,7 @@ class TtsFab extends StatelessWidget {
     required this.showUI,
     required this.isOverlayOpen,
     required this.readerTheme,
+    this.spotlightKey,
   });
 
   @override
@@ -27,31 +32,77 @@ class TtsFab extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    final isSynthesizing = ttsNotifier.isSynthesizing;
+    final progress = ttsNotifier.synthesisProgress;
+    final percent = (progress * 100).round();
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 16.0),
       child: AnimatedSlide(
         duration: const Duration(milliseconds: 250),
         offset: showUI ? const Offset(0, -1.5) : Offset.zero,
-        child: FloatingActionButton(
-          heroTag: 'tts_fab',
-          backgroundColor: accentGreen,
-          foregroundColor: Colors.white,
-          elevation: 4,
-          onPressed: () async {
-            if (ttsNotifier.isPlaying) {
-              ttsNotifier.pause();
-            } else if (ttsNotifier.isPaused) {
-              await ttsNotifier.togglePlayPause();
-            } else {
-              // Stop parsing and load text
-              final text = readerNotifier.extractStructuredText();
-              if (text.isNotEmpty) {
-                ttsNotifier.loadContent(text);
-                await ttsNotifier.togglePlayPause();
-              }
-            }
-          },
-          child: Icon(ttsNotifier.isPlaying ? Icons.pause : Icons.play_arrow),
+        // spotlightKey is INSIDE AnimatedSlide so localToGlobal accounts
+        // for the fractional translation → tutorial spotlight is accurate.
+        child: Stack(
+          key: spotlightKey,
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            FloatingActionButton(
+              heroTag: 'tts_fab',
+              backgroundColor: accentGreen,
+              foregroundColor: Colors.white,
+              elevation: 4,
+              onPressed: () async {
+                if (ttsNotifier.isPlaying) {
+                  ttsNotifier.pause();
+                } else if (ttsNotifier.isPaused) {
+                  await ttsNotifier.togglePlayPause();
+                } else {
+                  final text = readerNotifier.extractStructuredText();
+                  if (text.isNotEmpty) {
+                    ttsNotifier.loadContent(text);
+                    await ttsNotifier.togglePlayPause();
+                  }
+                }
+              },
+              child: Icon(
+                ttsNotifier.isPlaying ? Icons.pause : Icons.play_arrow,
+              ),
+            ),
+            // Percentage pill — bottom-right of FAB
+            if (isSynthesizing)
+              Positioned(
+                bottom: -4,
+                right: -4,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(40),
+                        blurRadius: 3,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    '$percent%',
+                    style: const TextStyle(
+                      color: accentGreen,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );

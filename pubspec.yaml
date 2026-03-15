@@ -20,7 +20,8 @@ dependencies:
   permission_handler: ^11.3.1
   path_provider: ^2.1.2
   path: ^1.9.0
-  flutter_tts: ^4.2.0
+  edge_tts: ^0.1.4
+  just_audio: ^0.9.43
   audio_service: ^0.18.15
   audio_session: ^0.1.21
   html: ^0.15.5

@@ -41,7 +41,16 @@ class TtsNotifier extends ChangeNotifier {
   bool get isPlaying => _state == TtsState.playing;
   bool get isPaused => _state == TtsState.paused;
 
-  List<dynamic> get availableLanguages => _ttsService.availableLanguages;
+  /// Synthesis progress for the current chapter (0.0 – 1.0)
+  double get synthesisProgress =>
+      _ttsService.batchTotal > 0
+          ? _ttsService.batchDone / _ttsService.batchTotal
+          : 0.0;
+  bool get isSynthesizing =>
+      _ttsService.batchTotal > 0 &&
+      _ttsService.batchDone < _ttsService.batchTotal;
+
+  List<String> get availableLanguages => _ttsService.availableLanguages;
   List<dynamic> get availableVoices => _ttsService.availableVoices;
 
   TtsNotifier(this._ttsService, this._prefs);
@@ -56,6 +65,7 @@ class TtsNotifier extends ChangeNotifier {
     _ttsService.onPause = _onPause;
     _ttsService.onContinue = _onContinue;
     _ttsService.onError = _onError;
+    _ttsService.onSynthesisProgress = (_, __) => notifyListeners();
 
     // Load saved settings
     _loadSettings();
@@ -132,8 +142,8 @@ class TtsNotifier extends ChangeNotifier {
   }
 
   void _onChunkComplete() {
-    // Move to next chunk and continue speaking
-    if (_currentChunkIndex < _chunks.length - 1) {
+    // Prefetch next chunk's audio if available
+    if (_currentChunkIndex + 1 < _chunks.length) {
       _currentChunkIndex++;
       _speakCurrentChunk();
     } else {
@@ -165,10 +175,16 @@ class TtsNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Load text content for TTS
+  /// Load text content for TTS and start synthesizing the whole chapter
   void loadContent(String text) {
     _chunks = TtsService.chunkText(text, _settings.highlightMode);
     _currentChunkIndex = 0;
+
+    // Pre-synthesize all chunks in the chapter with limited concurrency
+    if (_chunks.isNotEmpty) {
+      _ttsService.synthesizeAll(_chunks.map((c) => c.text).toList());
+    }
+
     notifyListeners();
   }
 
@@ -177,6 +193,7 @@ class TtsNotifier extends ChangeNotifier {
     _chunks = [];
     _currentChunkIndex = 0;
     _state = TtsState.idle;
+    _ttsService.clearCache();
     notifyListeners();
   }
 
@@ -185,9 +202,8 @@ class TtsNotifier extends ChangeNotifier {
     if (_chunks.isEmpty) return;
 
     if (_state == TtsState.paused) {
-      // Resume - unfortunately flutter_tts pause/resume is limited
-      // So we restart from current chunk
-      await _speakCurrentChunk();
+      // Proper resume from paused position
+      await _ttsService.resume();
     } else {
       await _speakCurrentChunk();
     }
@@ -268,6 +284,15 @@ class TtsNotifier extends ChangeNotifier {
         } catch (_) {}
       }
       final chunk = _chunks[_currentChunkIndex];
+
+      // Prefetch the next few chunks for seamless playback
+      for (int i = 1; i <= 3; i++) {
+        final ahead = _currentChunkIndex + i;
+        if (ahead < _chunks.length) {
+          _ttsService.prefetch(_chunks[ahead].text);
+        }
+      }
+
       await _ttsService.speak(chunk.text);
     }
   }
@@ -356,7 +381,12 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Get voices filtered by current language
   List<Map<String, dynamic>> getVoicesForCurrentLanguage() {
-    return _ttsService.getVoicesForLanguage(_settings.language);
+    return _ttsService.getVoicesForLanguage(_settings.language).map((v) => {
+      'name': v.shortName,
+      'locale': v.locale,
+      'gender': v.gender,
+      'friendlyName': v.friendlyName,
+    }).toList();
   }
 
   @override

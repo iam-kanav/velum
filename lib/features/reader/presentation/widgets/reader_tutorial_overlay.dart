@@ -106,7 +106,7 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
     _TutorialStep(
       title: 'Play / Pause TTS',
       description:
-          'Tap this button to start or pause\ntext-to-speech narration.',
+          'Tap this button to start or pause\ntext-to-speech narration.\nThe ring around it shows how much\nof the chapter has been prepared.',
       icon: Icons.play_circle_outline_rounded,
       elementKey: 'fab',
       spotlightPadding: 16,

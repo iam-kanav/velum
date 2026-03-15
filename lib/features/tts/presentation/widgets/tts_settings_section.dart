@@ -385,6 +385,28 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     );
   }
 
+  /// Extract a friendly display name from an Edge TTS voice short name.
+  /// e.g. 'en-US-EmmaMultilingualNeural' → 'Emma'
+  String _voiceDisplayName(Map<String, dynamic> voice) {
+    final shortName = voice['name'] as String? ?? '';
+    final gender = voice['gender'] as String? ?? '';
+    // shortName format: locale-NameNeural (e.g. en-US-EmmaMultilingualNeural)
+    final parts = shortName.split('-');
+    if (parts.length >= 3) {
+      var name = parts.sublist(2).join('-');
+      // Strip common suffixes
+      name = name
+          .replaceAll('MultilingualNeural', '')
+          .replaceAll('Neural', '')
+          .replaceAll('Multilingual', '');
+      if (name.isNotEmpty && gender.isNotEmpty) {
+        return '$name (${gender[0].toUpperCase()}${gender.substring(1).toLowerCase()})';
+      }
+      if (name.isNotEmpty) return name;
+    }
+    return shortName;
+  }
+
   Widget _buildVoiceDropdown(TtsNotifier ttsNotifier) {
     final allVoices = ttsNotifier.getVoicesForCurrentLanguage();
     final settings = ttsNotifier.settings;
@@ -438,7 +460,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           ),
         ),
         Container(
-          constraints: const BoxConstraints(maxWidth: 160),
+          constraints: const BoxConstraints(maxWidth: 180),
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             border: Border.all(color: widget.textColor.withAlpha(60)),
@@ -454,13 +476,11 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
               ),
             ),
             items: voices
-                .asMap()
-                .entries
                 .map(
-                  (entry) => DropdownMenuItem<String>(
-                    value: entry.value['name'] as String,
+                  (voice) => DropdownMenuItem<String>(
+                    value: voice['name'] as String,
                     child: Text(
-                      'Voice ${entry.key + 1}',
+                      _voiceDisplayName(voice),
                       style: TextStyle(color: widget.textColor, fontSize: 13),
                     ),
                   ),
