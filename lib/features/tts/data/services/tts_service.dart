@@ -92,6 +92,10 @@ class TtsService {
   int _batchTotal = 0;
   int _batchDone = 0;
 
+  /// Generation counter — incremented on every speak() call so that
+  /// stale processingState events from a previous audio source are ignored.
+  int _speakGeneration = 0;
+
   // Callbacks
   VoidCallback? onStart;
   VoidCallback? onComplete;
@@ -122,9 +126,11 @@ class TtsService {
       _availableVoices = [];
     }
 
-    // Listen for playback completion
+    // Listen for playback completion — only fire onComplete if the generation
+    // matches, so stale events from a previous audio source are ignored.
     _player.processingStateStream.listen((processingState) {
-      if (processingState == ProcessingState.completed) {
+      if (processingState == ProcessingState.completed &&
+          _state == TtsState.playing) {
         _state = TtsState.stopped;
         onComplete?.call();
       }
@@ -285,11 +291,22 @@ class TtsService {
   Future<void> speak(String text) async {
     if (text.isEmpty) return;
 
+    // Increment generation so any pending completion from the previous
+    // audio source is ignored by the processingStateStream listener.
+    final gen = ++_speakGeneration;
+
+    // Stop current playback first to prevent the player from firing
+    // a 'completed' event when we replace the audio source.
+    await _player.stop();
+
     _state = TtsState.playing;
     onStart?.call();
 
     try {
       final audioBytes = await _getAudio(text);
+
+      // If another speak() was called while we were synthesizing, bail out.
+      if (gen != _speakGeneration) return;
 
       if (audioBytes.isEmpty) {
         _state = TtsState.stopped;
@@ -301,6 +318,7 @@ class TtsService {
       await _player.setVolume(_volume);
       await _player.play();
     } catch (e) {
+      if (gen != _speakGeneration) return;
       _state = TtsState.stopped;
       onError?.call(e.toString());
     }
@@ -308,6 +326,7 @@ class TtsService {
 
   /// Stop speaking
   Future<void> stop() async {
+    _speakGeneration++; // Invalidate any in-flight speak()
     _state = TtsState.stopped;
     await _player.stop();
   }

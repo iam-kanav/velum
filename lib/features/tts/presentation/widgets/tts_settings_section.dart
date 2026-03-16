@@ -528,16 +528,18 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: _accentGreen.withAlpha(60)),
                     ),
-                    child: _isPreviewing
-                        ? SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: _accentGreen,
-                            ),
-                          )
-                        : Icon(Icons.volume_up, size: 16, color: _accentGreen),
+                    child: Center(
+                      child: _isPreviewing
+                          ? SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 1.5,
+                                color: _accentGreen,
+                              ),
+                            )
+                          : Icon(Icons.volume_up, size: 16, color: _accentGreen),
+                    ),
                   ),
                 ),
               ],

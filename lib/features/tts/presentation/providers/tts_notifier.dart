@@ -139,12 +139,18 @@ class TtsNotifier extends ChangeNotifier {
 
   // Event handlers
   void _onStart() {
-    _state = TtsState.playing;
+    // State is already set to playing in play() — just notify for highlight sync
+    if (_state != TtsState.playing) {
+      _state = TtsState.playing;
+    }
     notifyListeners();
   }
 
   void _onChunkComplete() {
-    // Prefetch next chunk's audio if available
+    // Ignore if we're not actually playing (e.g., stale callback after stop)
+    if (_state != TtsState.playing) return;
+
+    // Advance to next chunk if available
     if (_currentChunkIndex + 1 < _chunks.length) {
       _currentChunkIndex++;
       _speakCurrentChunk();
@@ -409,12 +415,43 @@ class TtsNotifier extends ChangeNotifier {
   }
 
   /// Preview the current voice with a short sample sentence.
+  /// Temporarily disconnects ALL callbacks so the preview doesn't
+  /// trigger auto-advance, state changes, or chunk progression.
   Future<void> previewVoice() async {
-    await _ttsService.applySettings(_settings);
-    await _ttsService.speak('The quick brown fox jumps over the lazy dog.');
-    // Wait for playback to finish
-    await Future.delayed(const Duration(seconds: 3));
-    await _ttsService.stop();
+    // Save and disconnect all callbacks
+    final savedOnStart = _ttsService.onStart;
+    final savedOnComplete = _ttsService.onComplete;
+    final savedOnPause = _ttsService.onPause;
+    final savedOnContinue = _ttsService.onContinue;
+    final savedOnError = _ttsService.onError;
+
+    final completer = Completer<void>();
+    _ttsService.onStart = null;
+    _ttsService.onComplete = () {
+      if (!completer.isCompleted) completer.complete();
+    };
+    _ttsService.onPause = null;
+    _ttsService.onContinue = null;
+    _ttsService.onError = (_) {
+      if (!completer.isCompleted) completer.complete();
+    };
+
+    try {
+      await _ttsService.applySettings(_settings);
+      await _ttsService.speak('The quick brown fox jumps over the lazy dog.');
+      await completer.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {},
+      );
+      await _ttsService.stop();
+    } finally {
+      // Restore all callbacks
+      _ttsService.onStart = savedOnStart;
+      _ttsService.onComplete = savedOnComplete;
+      _ttsService.onPause = savedOnPause;
+      _ttsService.onContinue = savedOnContinue;
+      _ttsService.onError = savedOnError;
+    }
   }
 
   /// Get voices filtered by current language
