@@ -44,7 +44,7 @@ class TtsFab extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOut,
-      margin: EdgeInsets.only(bottom: showUI ? 100.0 : 0.0),
+      margin: EdgeInsets.only(bottom: showUI ? 120.0 : 40.0),
       child: Stack(
         key: spotlightKey,
         clipBehavior: Clip.none,
