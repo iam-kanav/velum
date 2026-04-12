@@ -154,6 +154,9 @@ class TtsNotifier extends ChangeNotifier {
     if (_currentChunkIndex + 1 < _chunks.length) {
       _currentChunkIndex++;
       _speakCurrentChunk();
+      // Don't notifyListeners() here — _onStart() will notify once the next
+      // chunk's audio is actually playing, keeping the highlight in sync.
+      return;
     } else {
       // Finished all chunks in this chapter
       _state = TtsState.stopped;

@@ -300,7 +300,6 @@ class TtsService {
     await _player.stop();
 
     _state = TtsState.playing;
-    onStart?.call();
 
     try {
       final audioBytes = await _getAudio(text);
@@ -317,6 +316,12 @@ class TtsService {
       await _player.setAudioSource(_BytesAudioSource(audioBytes));
       await _player.setVolume(_volume);
       await _player.play();
+
+      // Signal onStart only after audio is actually playing, so that
+      // highlight sync in the UI matches the audible output.
+      if (gen == _speakGeneration) {
+        onStart?.call();
+      }
     } catch (e) {
       if (gen != _speakGeneration) return;
       _state = TtsState.stopped;
