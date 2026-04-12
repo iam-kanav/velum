@@ -473,6 +473,47 @@ class _SettingsModalState extends State<SettingsModal> {
           ),
           const SizedBox(height: 16),
 
+          // Horizontal Margin Slider
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Margins',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: readerTheme.textColor,
+                ),
+              ),
+              Consumer<SettingsNotifier>(
+                builder: (context, notifier, _) {
+                  return Text(
+                    '${notifier.settings.horizontalMargin.toInt()}px',
+                    style: TextStyle(color: readerTheme.textColor),
+                  );
+                },
+              ),
+            ],
+          ),
+          Consumer<SettingsNotifier>(
+            builder: (context, notifier, _) {
+              return SliderTheme(
+                data: SliderThemeData(
+                  activeTrackColor: _accentGreen,
+                  inactiveTrackColor: readerTheme.textColor.withAlpha(40),
+                  thumbColor: _accentGreen,
+                ),
+                child: Slider(
+                  value: notifier.settings.horizontalMargin,
+                  min: 0,
+                  max: 40,
+                  divisions: 8,
+                  onChanged: (val) => notifier.updateHorizontalMargin(val),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 16),
+
           // Text Alignment
           Text(
             'Text Alignment',
@@ -512,47 +553,6 @@ class _SettingsModalState extends State<SettingsModal> {
                     ),
                   );
                 }).toList(),
-              );
-            },
-          ),
-          const SizedBox(height: 16),
-
-          // Horizontal Margin Slider
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Margins',
-                style: TextStyle(
-                  fontWeight: FontWeight.w600,
-                  color: readerTheme.textColor,
-                ),
-              ),
-              Consumer<SettingsNotifier>(
-                builder: (context, notifier, _) {
-                  return Text(
-                    '${notifier.settings.horizontalMargin.toInt()}px',
-                    style: TextStyle(color: readerTheme.textColor),
-                  );
-                },
-              ),
-            ],
-          ),
-          Consumer<SettingsNotifier>(
-            builder: (context, notifier, _) {
-              return SliderTheme(
-                data: SliderThemeData(
-                  activeTrackColor: _accentGreen,
-                  inactiveTrackColor: readerTheme.textColor.withAlpha(40),
-                  thumbColor: _accentGreen,
-                ),
-                child: Slider(
-                  value: notifier.settings.horizontalMargin,
-                  min: 0,
-                  max: 40,
-                  divisions: 8,
-                  onChanged: (val) => notifier.updateHorizontalMargin(val),
-                ),
               );
             },
           ),
