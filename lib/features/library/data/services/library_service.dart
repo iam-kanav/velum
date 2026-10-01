@@ -330,6 +330,28 @@ class LibraryService {
     return _booksBox.values.toList();
   }
 
+  /// Remove books whose file no longer exists (deleted or moved outside the
+  /// app). They aren't added to the deleted list, so if the file comes back
+  /// a scan finds it again. Returns the removed paths.
+  Future<List<String>> removeMissingBooks() async {
+    // Without storage access, files in shared storage can't be seen and would
+    // all look missing; only check the app's own copies then.
+    final appDir = (await getApplicationDocumentsDirectory()).path;
+    final canSeeShared = await hasStoragePermission();
+    final missing = <String>[];
+    for (final path in _booksBox.keys.cast<String>().toList()) {
+      if (path.startsWith('assets/')) continue;
+      if (!canSeeShared && !path.startsWith(appDir)) continue;
+      try {
+        if (!await File(path).exists()) missing.add(path);
+      } catch (_) {
+        // Unreadable path (e.g. permission revoked): keep the entry.
+      }
+    }
+    if (missing.isNotEmpty) await _booksBox.deleteAll(missing);
+    return missing;
+  }
+
   Future<void> addBook(ScannedBook book) async {
     if (!_booksBox.containsKey(book.filePath)) {
       await _booksBox.put(book.filePath, book);

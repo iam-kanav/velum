@@ -166,8 +166,21 @@ class LibraryNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Drop library entries whose files were deleted outside the app, and
+  /// take them out of collections too.
+  Future<void> _removeMissingBooks() async {
+    final missing = await _libraryService.removeMissingBooks();
+    if (missing.isEmpty) return;
+    for (final path in missing) {
+      await _collectionService.forgetBook(path);
+    }
+    _collections = _collectionService.load();
+    _loadBooks();
+  }
+
   /// Initialize auto-scan on startup if enabled and permitted
   Future<void> _initAutoScan() async {
+    await _removeMissingBooks();
     if (_libraryService.isAutoScanEnabled) {
       final hasPermission = await _libraryService.hasStoragePermission();
       if (hasPermission) {
@@ -235,6 +248,7 @@ class LibraryNotifier extends ChangeNotifier {
       _sortedAndFilteredCache = null;
       notifyListeners();
     }
+    await _removeMissingBooks();
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -261,6 +275,7 @@ class LibraryNotifier extends ChangeNotifier {
   }
 
   Future<void> refresh() async {
+    await _removeMissingBooks();
     if (isAutoScanEnabled) {
       final hasPermission = await _libraryService.hasStoragePermission();
       if (hasPermission) {
