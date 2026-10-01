@@ -23,11 +23,29 @@ import '../../features/notes/presentation/note_editor_screen.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 
+/// Notifies only when onboarding completes. The router must not refresh on
+/// every library change (progress saves, notes): a refresh racing an
+/// imperative pop re-adds the route that was just closed.
+class _OnboardingListenable extends ChangeNotifier {
+  final LibraryNotifier _library;
+  late bool _complete = _library.isOnboardingComplete;
+
+  _OnboardingListenable(this._library) {
+    _library.addListener(_check);
+  }
+
+  void _check() {
+    if (_library.isOnboardingComplete == _complete) return;
+    _complete = _library.isOnboardingComplete;
+    notifyListeners();
+  }
+}
+
 GoRouter createAppRouter(LibraryNotifier libraryNotifier) {
   return GoRouter(
     navigatorKey: _rootNavigatorKey,
     initialLocation: '/',
-    refreshListenable: libraryNotifier,
+    refreshListenable: _OnboardingListenable(libraryNotifier),
     redirect: (context, state) {
       final isOnboarding = state.matchedLocation == '/onboarding';
       if (!libraryNotifier.isOnboardingComplete) {

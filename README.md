@@ -32,26 +32,26 @@ Open an EPUB, press play, and follow along as each sentence lights up.
 - 📝 **Create New.** Tap **+** → **Create New**, then write or paste anything (a whole Google Doc, an article, notes) and listen to it like a book. Headings, lists and bold/italic come along; colours and clutter don't.
 - 📚 **Library.** Finds the EPUBs on your device automatically, with covers, search, sorting and pinning.
 - 📖 **Remembers your place.** Every chapter keeps its own scroll position and read-aloud spot, even after you close the app.
-- 🖍️ **Highlights and bookmarks.** Five highlight colours and exact-position bookmarks, all in one panel.
+- 🖍️ **Highlights and bookmarks.** Select text and a small colour pill appears just below it. Bookmarks save your exact spot.
 - 🔍 **Search the whole book** with snippets that take you right to the match.
 - 🎨 **Light, dark and sepia** themes, plus fonts, size, spacing and margins, including your own font files.
 
 ## 📱 Screenshots
 
+<p align="center"><img src="docs/screenshots/themes.png" width="92%" alt="Light, dark and sepia reader themes" /><br/><sub><b>Light, dark and sepia</b></sub></p>
+
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/screenshots/library.png" alt="Library" /><br/><sub><b>Your library</b></sub></td>
-    <td align="center" width="33%"><img src="docs/screenshots/read-aloud.png" alt="Read-aloud" /><br/><sub><b>Each sentence lights up as it's read</b></sub></td>
-    <td align="center" width="33%"><img src="docs/screenshots/voice-settings.png" alt="Voice settings" /><br/><sub><b>Voice, speed and pitch</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/library.png" alt="Library (dark)" /><br/><sub><b>Your library</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/read-aloud.png" alt="Read-aloud (sepia)" /><br/><sub><b>Each sentence lights up as it's read</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/voice-settings.png" alt="Voice settings (light)" /><br/><sub><b>Voice, speed and pitch</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/add.png" alt="Add sheet" /><br/><sub><b>Tap + for From Files or Create New</b></sub></td>
-    <td align="center"><img src="docs/screenshots/new-note.png" alt="Note editor" /><br/><sub><b>Paste a document. Formatting is kept</b></sub></td>
-    <td></td>
+    <td align="center" width="33%"><img src="docs/screenshots/add.png" alt="Plus menu (dark)" /><br/><sub><b>Tap + for From Files or Create New</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/new-note.png" alt="Note editor (light)" /><br/><sub><b>Paste a document. Formatting is kept</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/highlight.png" alt="Highlight pill (dark)" /><br/><sub><b>Highlight right below your selection</b></sub></td>
   </tr>
 </table>
-
-<p align="center"><img src="docs/screenshots/themes.png" width="90%" alt="Light, dark and sepia themes" /><br/><sub><b>Light, dark and sepia</b></sub></p>
 
 ## 🔊 Read-aloud
 

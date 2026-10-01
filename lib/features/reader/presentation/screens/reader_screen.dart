@@ -84,6 +84,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // Text selection / highlight color picker
   bool _showColorPicker = false;
+  Rect? _selectionRect; // selection on screen: top of first line, end of last
   String _selectedText = '';
   int _selectionStartOffset = 0;
   int _selectionEndOffset = 0;
@@ -508,8 +509,15 @@ class _ReaderScreenState extends State<ReaderScreen>
                   final text = json['text'] as String? ?? '';
                   final start = json['startOffset'] as int? ?? 0;
                   final end = json['endOffset'] as int? ?? 0;
+                  double n(String k) => (json[k] as num?)?.toDouble() ?? 0;
                   if (text.isNotEmpty) {
                     setState(() {
+                      _selectionRect = Rect.fromLTRB(
+                        0,
+                        n('top'),
+                        n('right'),
+                        n('bottom'),
+                      );
                       _selectedText = text;
                       _selectionStartOffset = start;
                       _selectionEndOffset = end;
@@ -1072,47 +1080,32 @@ class _ReaderScreenState extends State<ReaderScreen>
               ),
             ),
 
-          // Color picker overlay for highlighting
-          if (_showColorPicker)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + kToolbarHeight + 8,
-              left: 0,
-              right: 0,
-              child: Stack(
-                children: [
-                  ColorPickerBar(
+          // Highlight colours: a small pill just below the last selected
+          // word, so the selection and its handles stay free to adjust.
+          if (_showColorPicker && _selectionRect != null)
+            Builder(
+              builder: (context) {
+                final size = MediaQuery.of(context).size;
+                final insets = MediaQuery.of(context).padding;
+                const w = ColorPickerBar.width, h = ColorPickerBar.height;
+                // Leave room for the selection's end handle under the text.
+                var top = _selectionRect!.bottom + 44;
+                if (top + h > size.height - insets.bottom - 12) {
+                  // No room below: sit above the selection instead.
+                  top = _selectionRect!.top - h - 64;
+                }
+                top = top.clamp(insets.top + 8, size.height - insets.bottom - h - 12);
+                final left = (_selectionRect!.right - w / 2)
+                    .clamp(12.0, size.width - w - 12);
+                return Positioned(
+                  top: top,
+                  left: left,
+                  child: ColorPickerBar(
                     readerTheme: readerTheme,
-                    notifier: notifier,
-                    selectedText: _selectedText,
                     onHighlightSelected: _applyHighlight,
                   ),
-                  Positioned(
-                    right: 16,
-                    top: 10,
-                    child: GestureDetector(
-                      onTap: () {
-                        _controller.runJavaScript(
-                          'window.getSelection().removeAllRanges();',
-                        );
-                        setState(() => _showColorPicker = false);
-                      },
-                      child: Container(
-                        width: 28,
-                        height: 28,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: readerTheme.textColor.withAlpha(20),
-                        ),
-                        child: Icon(
-                          Icons.close,
-                          size: 16,
-                          color: readerTheme.textColor,
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
+                );
+              },
             ),
 
           // Book complete overlay

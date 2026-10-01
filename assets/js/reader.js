@@ -317,27 +317,41 @@ window.searchClear = function() {
 // ── Highlight system ──────────────────────────────────────────
 // Listen for text selection changes
 var selectionTimeout;
+// Report the selection, plus where it starts and ends on screen so the
+// highlight pill can sit just below the last selected word.
+function reportSelection() {
+  var sel = window.getSelection();
+  if (sel && sel.toString().trim().length > 0 && sel.rangeCount > 0) {
+    var range = sel.getRangeAt(0);
+    // Calculate text offset within the body
+    var preRange = document.createRange();
+    preRange.selectNodeContents(document.body);
+    preRange.setEnd(range.startContainer, range.startOffset);
+    var startOffset = preRange.toString().length;
+    var endOffset = startOffset + sel.toString().length;
+    var rects = range.getClientRects();
+    var first = rects.length ? rects[0] : range.getBoundingClientRect();
+    var last = rects.length ? rects[rects.length - 1] : first;
+    ReaderChannel.postMessage('selection:' + JSON.stringify({
+      text: sel.toString().trim(),
+      startOffset: startOffset,
+      endOffset: endOffset,
+      top: first.top,
+      bottom: last.bottom,
+      right: last.right
+    }));
+  } else {
+    ReaderChannel.postMessage('selection-cleared');
+  }
+}
 document.addEventListener('selectionchange', function() {
   clearTimeout(selectionTimeout);
-  selectionTimeout = setTimeout(function() {
-    var sel = window.getSelection();
-    if (sel && sel.toString().trim().length > 0 && sel.rangeCount > 0) {
-      var range = sel.getRangeAt(0);
-      // Calculate text offset within the body
-      var preRange = document.createRange();
-      preRange.selectNodeContents(document.body);
-      preRange.setEnd(range.startContainer, range.startOffset);
-      var startOffset = preRange.toString().length;
-      var endOffset = startOffset + sel.toString().length;
-      ReaderChannel.postMessage('selection:' + JSON.stringify({
-        text: sel.toString().trim(),
-        startOffset: startOffset,
-        endOffset: endOffset
-      }));
-    } else {
-      ReaderChannel.postMessage('selection-cleared');
-    }
-  }, 300);
+  selectionTimeout = setTimeout(reportSelection, 150);
+});
+window.addEventListener('scroll', function() {
+  if (window.getSelection().toString().length === 0) return;
+  clearTimeout(selectionTimeout);
+  selectionTimeout = setTimeout(reportSelection, 150);
 });
 
 // Apply a highlight visually
