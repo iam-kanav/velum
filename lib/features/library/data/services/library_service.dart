@@ -375,26 +375,31 @@ class LibraryService {
     );
   }
 
-  Future<void> removeBook(String filePath) async {
+  /// Remove a book from the library. App-owned copies (imports, notes) are
+  /// always deleted; with [deleteFile] the original file on the device is
+  /// deleted too. Returns false if that file couldn't be deleted.
+  Future<bool> removeBook(String filePath, {bool deleteFile = false}) async {
     await _booksBox.delete(filePath);
     if (NoteService.isNote(filePath)) {
       await const NoteService().delete(filePath);
-      return;
+      return true;
     }
-    await _addToDeletedPaths(filePath);
 
-    // Clean up the copied file if it's in our books directory
+    final appDir = await getApplicationDocumentsDirectory();
+    final appCopy = filePath.startsWith(p.join(appDir.path, 'books'));
+    if (!appCopy && !deleteFile) {
+      // Kept on the device: don't let the next scan add it back.
+      await _addToDeletedPaths(filePath);
+      return true;
+    }
     try {
-      final appDir = await getApplicationDocumentsDirectory();
-      final booksDir = p.join(appDir.path, 'books');
-      if (filePath.startsWith(booksDir)) {
-        final file = File(filePath);
-        if (await file.exists()) {
-          await file.delete();
-        }
-      }
+      final file = File(filePath);
+      if (await file.exists()) await file.delete();
+      return true;
     } catch (e) {
       debugPrint('Error deleting book file: $e');
+      await _addToDeletedPaths(filePath);
+      return false;
     }
   }
 

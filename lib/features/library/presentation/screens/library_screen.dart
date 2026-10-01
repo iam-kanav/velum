@@ -91,36 +91,69 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   void _deleteSelected() async {
     final libraryNotifier = context.read<LibraryNotifier>();
+    final count = _selectedBooks.length;
+    final books = '$count book${count == 1 ? '' : 's'}';
+    var deleteFiles = true;
 
-    // Show confirmation dialog
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Books'),
-        content: Text(
-          'Remove ${_selectedBooks.length} book${_selectedBooks.length == 1 ? '' : 's'} from your library?\n\nThis will not delete the files from your device.',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Delete Books'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Remove $books from your library?'),
+              const SizedBox(height: 12),
+              CheckboxListTile(
+                value: deleteFiles,
+                onChanged: (v) => setState(() => deleteFiles = v ?? false),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: Colors.red,
+                title: const Text('Also delete the files from my device'),
+                subtitle: deleteFiles
+                    ? const Text('This can\'t be undone')
+                    : null,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Delete'),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
-            child: const Text('Delete'),
-          ),
-        ],
       ),
     );
 
     if (confirmed == true) {
-      for (final path in _selectedBooks) {
-        await libraryNotifier.removeBook(
+      var failed = 0;
+      for (final path in Set.of(_selectedBooks)) {
+        final ok = await libraryNotifier.removeBook(
           ScannedBook(filePath: path, title: '', author: ''),
+          deleteFile: deleteFiles,
         );
+        if (!ok) failed++;
       }
       _cancelSelection();
+      if (failed > 0 && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Couldn't delete $failed file${failed == 1 ? '' : 's'} from your device. "
+              'Velum needs storage access (Settings → Auto-scan).',
+            ),
+          ),
+        );
+      }
     }
   }
 

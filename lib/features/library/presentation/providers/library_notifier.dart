@@ -51,17 +51,42 @@ class LibraryNotifier extends ChangeNotifier {
   }
 
   Future<BookCollection> createCollection(
-    String name, [
+    String name, {
     Iterable<String> bookPaths = const [],
-  ]) async {
-    final c = await _collectionService.create(name, bookPaths.toList());
+    bool hideFromLibrary = false,
+  }) async {
+    final c = await _collectionService.create(
+      name,
+      bookPaths.toList(),
+      hideFromLibrary: hideFromLibrary,
+    );
     _reloadCollections();
     return c;
   }
 
-  Future<void> renameCollection(String id, String name) async {
-    await _collectionService.rename(id, name);
+  Future<void> updateCollection(
+    String id, {
+    String? name,
+    bool? hideFromLibrary,
+  }) async {
+    await _collectionService.update(
+      id,
+      name: name,
+      hideFromLibrary: hideFromLibrary,
+    );
     _reloadCollections();
+  }
+
+  /// Paths kept out of "All books" by collections set to hide their books.
+  Set<String> get _hiddenFromLibrary => {
+    for (final c in _collections)
+      if (c.hideFromLibrary) ...c.bookPaths,
+  };
+
+  /// Number of books "All books" shows.
+  int get allBooksCount {
+    final hidden = _hiddenFromLibrary;
+    return _books.where((b) => !hidden.contains(b.filePath)).length;
   }
 
   Future<void> deleteCollection(String id) async {
@@ -112,6 +137,11 @@ class LibraryNotifier extends ChangeNotifier {
     if (collection != null) {
       final paths = collection.bookPaths.toSet();
       filtered = filtered.where((b) => paths.contains(b.filePath)).toList();
+    } else {
+      final hidden = _hiddenFromLibrary;
+      if (hidden.isNotEmpty) {
+        filtered = filtered.where((b) => !hidden.contains(b.filePath)).toList();
+      }
     }
 
     // 1. Filter by search query
@@ -291,10 +321,16 @@ class LibraryNotifier extends ChangeNotifier {
     _loadBooks();
   }
 
-  Future<void> removeBook(ScannedBook book) async {
-    await _libraryService.removeBook(book.filePath);
+  /// See [LibraryService.removeBook]. Returns false if the device file
+  /// couldn't be deleted.
+  Future<bool> removeBook(ScannedBook book, {bool deleteFile = false}) async {
+    final ok = await _libraryService.removeBook(
+      book.filePath,
+      deleteFile: deleteFile,
+    );
     await _collectionService.forgetBook(book.filePath);
     _collections = _collectionService.load();
     _loadBooks();
+    return ok;
   }
 }

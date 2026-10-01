@@ -123,7 +123,7 @@ class CollectionsDrawer extends StatelessWidget {
             row(
               icon: const Icon(Icons.bookmark),
               label: 'All books',
-              trailing: '${library.books.length}',
+              trailing: '${library.allBooksCount}',
               selected: current == null,
               onTap: () => open(null),
             ),
@@ -189,8 +189,13 @@ class CollectionsDrawer extends StatelessWidget {
               icon: const Icon(Icons.add),
               label: 'Create collection',
               onTap: () async {
-                final name = await showCollectionNameDialog(context, theme);
-                if (name != null) await library.createCollection(name);
+                final details = await showCollectionDialog(context, theme);
+                if (details != null) {
+                  await library.createCollection(
+                    details.name,
+                    hideFromLibrary: details.hideFromLibrary,
+                  );
+                }
               },
             ),
           ],
@@ -200,96 +205,154 @@ class CollectionsDrawer extends StatelessWidget {
   }
 }
 
-/// Dialog asking for a collection name. Returns the trimmed name, or null.
-Future<String?> showCollectionNameDialog(
+/// The choices made in [showCollectionDialog].
+typedef CollectionDetails = ({String name, bool hideFromLibrary});
+
+/// Dialog for a collection's name and whether its books stay out of
+/// "All books". Returns the details, or null if cancelled.
+Future<CollectionDetails?> showCollectionDialog(
   BuildContext context,
   ReaderTheme theme, {
   String title = 'New collection',
   String action = 'Create',
   String initial = '',
+  bool initialHide = false,
   String? helper,
 }) {
+  var hide = initialHide;
   // Existing name starts selected, so typing replaces it.
   final controller = TextEditingController(text: initial)
     ..selection = TextSelection(baseOffset: 0, extentOffset: initial.length);
-  return showDialog<String>(
+  return showDialog<CollectionDetails>(
     context: context,
-    builder: (ctx) {
-      void submit() {
-        final name = controller.text.trim();
-        if (name.isNotEmpty) Navigator.of(ctx).pop(name);
-      }
+    builder: (ctx) => StatefulBuilder(
+      builder: (ctx, setState) {
+        void submit() {
+          final name = controller.text.trim();
+          if (name.isNotEmpty) {
+            Navigator.of(ctx).pop((name: name, hideFromLibrary: hide));
+          }
+        }
 
-      return AlertDialog(
-        backgroundColor: _surface(theme),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Text(
-          title,
-          style: GoogleFonts.inter(
-            color: theme.textColor,
-            fontSize: 20,
-            fontWeight: FontWeight.w700,
+        return AlertDialog(
+          backgroundColor: _surface(theme),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
           ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: controller,
-              autofocus: true,
-              textCapitalization: TextCapitalization.sentences,
-              onSubmitted: (_) => submit(),
-              style: GoogleFonts.inter(color: theme.textColor, fontSize: 15.5),
-              decoration: InputDecoration(
-                labelText: 'Name',
-                labelStyle: TextStyle(color: theme.textColor.withAlpha(150)),
-                floatingLabelStyle: const TextStyle(color: _accent),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: BorderSide(color: theme.textColor.withAlpha(60)),
+          title: Text(
+            title,
+            style: GoogleFonts.inter(
+              color: theme.textColor,
+              fontSize: 20,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: controller,
+                autofocus: true,
+                textCapitalization: TextCapitalization.sentences,
+                onSubmitted: (_) => submit(),
+                style: GoogleFonts.inter(
+                  color: theme.textColor,
+                  fontSize: 15.5,
                 ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: _accent, width: 2),
+                decoration: InputDecoration(
+                  labelText: 'Name',
+                  labelStyle: TextStyle(color: theme.textColor.withAlpha(150)),
+                  floatingLabelStyle: const TextStyle(color: _accent),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: BorderSide(
+                      color: theme.textColor.withAlpha(60),
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: _accent, width: 2),
+                  ),
                 ),
               ),
-            ),
-            if (helper != null) ...[
-              const SizedBox(height: 8),
-              Text(
-                helper,
-                style: GoogleFonts.inter(
-                  color: theme.textColor.withAlpha(150),
-                  fontSize: 12.5,
+              if (helper != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  helper,
+                  style: GoogleFonts.inter(
+                    color: theme.textColor.withAlpha(150),
+                    fontSize: 12.5,
+                  ),
+                ),
+              ],
+              const SizedBox(height: 12),
+              InkWell(
+                onTap: () => setState(() => hide = !hide),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Only show in this collection',
+                              style: GoogleFonts.inter(
+                                color: theme.textColor,
+                                fontSize: 14.5,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              'Its books won\'t appear in All books',
+                              style: GoogleFonts.inter(
+                                color: theme.textColor.withAlpha(150),
+                                fontSize: 12.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Switch(
+                        value: hide,
+                        onChanged: (v) => setState(() => hide = v),
+                        activeThumbColor: Colors.white,
+                        activeTrackColor: _accent,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: Text(
+                'Cancel',
+                style: TextStyle(color: theme.textColor.withAlpha(170)),
+              ),
+            ),
+            FilledButton(
+              onPressed: submit,
+              style: FilledButton.styleFrom(
+                backgroundColor: _accent,
+                foregroundColor: Colors.white,
+              ),
+              child: Text(action),
+            ),
           ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(
-              'Cancel',
-              style: TextStyle(color: theme.textColor.withAlpha(170)),
-            ),
-          ),
-          FilledButton(
-            onPressed: submit,
-            style: FilledButton.styleFrom(
-              backgroundColor: _accent,
-              foregroundColor: Colors.white,
-            ),
-            child: Text(action),
-          ),
-        ],
-      );
-    },
+        );
+      },
+    ),
   );
 }
 
-/// Long-press on a collection: rename or delete it.
+/// Long-press on a collection: edit (name, hide from All books) or delete.
 Future<void> showCollectionOptions(
   BuildContext context,
   ReaderTheme theme,
@@ -310,8 +373,8 @@ Future<void> showCollectionOptions(
           children: [
             ListTile(
               leading: Icon(Icons.edit_outlined, color: theme.textColor),
-              title: Text('Rename', style: TextStyle(color: theme.textColor)),
-              onTap: () => Navigator.of(ctx).pop('rename'),
+              title: Text('Edit', style: TextStyle(color: theme.textColor)),
+              onTap: () => Navigator.of(ctx).pop('edit'),
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline, color: Colors.red),
@@ -331,15 +394,22 @@ Future<void> showCollectionOptions(
     ),
   );
   if (!context.mounted) return;
-  if (choice == 'rename') {
-    final name = await showCollectionNameDialog(
+  if (choice == 'edit') {
+    final details = await showCollectionDialog(
       context,
       theme,
-      title: 'Rename collection',
+      title: 'Edit collection',
       action: 'Save',
       initial: collection.name,
+      initialHide: collection.hideFromLibrary,
     );
-    if (name != null) await library.renameCollection(collection.id, name);
+    if (details != null) {
+      await library.updateCollection(
+        collection.id,
+        name: details.name,
+        hideFromLibrary: details.hideFromLibrary,
+      );
+    }
   } else if (choice == 'delete') {
     await library.deleteCollection(collection.id);
   }
@@ -554,14 +624,18 @@ Future<String?> showAddToCollectionSheet(
 
   if (result == 'done') return 'Collections updated';
   if (result != 'new' || !context.mounted) return null;
-  final name = await showCollectionNameDialog(
+  final details = await showCollectionDialog(
     context,
     theme,
     helper: '$countLabel will be added',
   );
-  if (name == null) return null;
-  await library.createCollection(name, bookPaths);
-  return 'Added $countLabel to $name';
+  if (details == null) return null;
+  await library.createCollection(
+    details.name,
+    bookPaths: bookPaths,
+    hideFromLibrary: details.hideFromLibrary,
+  );
+  return 'Added $countLabel to ${details.name}';
 }
 
 class _CollectionTickRow extends StatelessWidget {

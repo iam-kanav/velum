@@ -21,10 +21,12 @@ void main() {
     expect(html, contains('<br/>'));
 
     final (_, paragraphs) = ChapterProcessor.process(html);
-    expect(
-      paragraphs.map((p) => p.text),
-      ['Plan', 'First line.Second line.', 'Apples', 'Pears'],
-    );
+    expect(paragraphs.map((p) => p.text), [
+      'Plan',
+      'First line.Second line.',
+      'Apples',
+      'Pears',
+    ]);
   });
 
   test('notes are recognised by their folder', () {

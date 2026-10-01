@@ -13,11 +13,16 @@ List<TtsParagraph> processAndCheck(String html) {
   expect(
     body.querySelectorAll('.tts-sent .tts-sent'),
     isEmpty,
-    reason: 'sentence spans must never nest (nested spans make text be read twice)',
+    reason:
+        'sentence spans must never nest (nested spans make text be read twice)',
   );
 
   final paraEls = body.querySelectorAll('.tts-para');
-  expect(paraEls.length, paragraphs.length, reason: 'one element per paragraph');
+  expect(
+    paraEls.length,
+    paragraphs.length,
+    reason: 'one element per paragraph',
+  );
 
   String norm(String t) => t.replaceAll(RegExp(r'\s+'), ' ').trim();
 
@@ -39,7 +44,10 @@ List<TtsParagraph> processAndCheck(String html) {
       expect(norm(pieces.map((p) => p.text).join()), norm(s.text));
     }
     // The sentences together are the paragraph: nothing missing, nothing twice.
-    expect(norm(sentences.map((s) => s.text).join(' ')), norm(paragraphs[i].text));
+    expect(
+      norm(sentences.map((s) => s.text).join(' ')),
+      norm(paragraphs[i].text),
+    );
   }
   return paragraphs;
 }
@@ -179,27 +187,21 @@ void main() {
 
     test('sentence mode speaks each sentence with its page position', () {
       final chunks = chunkParagraphs(paragraphs, TtsHighlightMode.sentence);
-      expect(
-        chunks.map((c) => (c.text, c.paragraphIndex, c.sentenceIndex)),
-        [
-          ('Chapter One', 0, null),
-          ('A first.', 1, 0),
-          ('A second.', 1, 1),
-          ('Alone.', 2, null),
-        ],
-      );
+      expect(chunks.map((c) => (c.text, c.paragraphIndex, c.sentenceIndex)), [
+        ('Chapter One', 0, null),
+        ('A first.', 1, 0),
+        ('A second.', 1, 1),
+        ('Alone.', 2, null),
+      ]);
     });
 
     test('paragraph mode speaks whole paragraphs', () {
       final chunks = chunkParagraphs(paragraphs, TtsHighlightMode.paragraph);
-      expect(
-        chunks.map((c) => (c.text, c.paragraphIndex, c.sentenceIndex)),
-        [
-          ('Chapter One', 0, null),
-          ('A first. A second.', 1, null),
-          ('Alone.', 2, null),
-        ],
-      );
+      expect(chunks.map((c) => (c.text, c.paragraphIndex, c.sentenceIndex)), [
+        ('Chapter One', 0, null),
+        ('A first. A second.', 1, null),
+        ('Alone.', 2, null),
+      ]);
     });
   });
 }

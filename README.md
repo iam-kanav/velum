@@ -31,7 +31,7 @@ Open an EPUB, press play, and follow along as each sentence lights up.
 - ▶️ **Starts where you are.** Press play to begin at the first sentence on screen, or double-tap any sentence to jump straight to it.
 - 📝 **Create New.** Tap **+** → **Create New**, then write or paste anything (a whole Google Doc, an article, notes) and listen to it like a book. Headings, lists and bold/italic come along; colours and clutter don't.
 - 📚 **Library.** Finds the EPUBs on your device automatically, with covers, search, sorting and pinning.
-- 🗂️ **Collections.** Long-press books, tap the folder button, and group them ("Classics", "To read"). Open a collection from the ☰ menu; a book can be in as many as you like.
+- 🗂️ **Collections.** Long-press books, tap the folder button, and group them ("Classics", "To read"). Open a collection from the ☰ menu; a book can be in as many as you like. Turn on *Only show in this collection* to keep its books out of All books.
 - 📖 **Remembers your place.** Every chapter keeps its own scroll position and read-aloud spot, even after you close the app.
 - 🖍️ **Highlights and bookmarks.** Select text and a small colour pill appears just below it. Bookmarks save your exact spot.
 - 🔍 **Search the whole book** with snippets that take you right to the match.

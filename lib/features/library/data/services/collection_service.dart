@@ -29,18 +29,28 @@ class CollectionService {
     jsonEncode(collections.map((c) => c.toJson()).toList()),
   );
 
-  Future<BookCollection> create(String name, List<String> bookPaths) async {
+  Future<BookCollection> create(
+    String name,
+    List<String> bookPaths, {
+    bool hideFromLibrary = false,
+  }) async {
     final collection = BookCollection(
       id: const Uuid().v4(),
       name: name,
       bookPaths: bookPaths,
+      hideFromLibrary: hideFromLibrary,
     );
     await _save([...load(), collection]);
     return collection;
   }
 
-  Future<void> rename(String id, String name) =>
-      _save([for (final c in load()) c.id == id ? c.copyWith(name: name) : c]);
+  Future<void> update(String id, {String? name, bool? hideFromLibrary}) =>
+      _save([
+        for (final c in load())
+          c.id == id
+              ? c.copyWith(name: name, hideFromLibrary: hideFromLibrary)
+              : c,
+      ]);
 
   Future<void> delete(String id) =>
       _save(load().where((c) => c.id != id).toList());

@@ -13,10 +13,12 @@ void main() {
   test('create, rename and delete keep order and survive reloads', () async {
     final a = await service.create('Classics', ['/a.epub', '/b.epub']);
     await service.create('To read', []);
-    await service.rename(a.id, 'Old classics');
+    await service.update(a.id, name: 'Old classics', hideFromLibrary: true);
 
     expect(service.load().map((c) => c.name), ['Old classics', 'To read']);
     expect(service.load().first.bookPaths, ['/a.epub', '/b.epub']);
+    expect(service.load().first.hideFromLibrary, isTrue);
+    expect(service.load().last.hideFromLibrary, isFalse);
 
     await service.delete(a.id);
     expect(service.load().map((c) => c.name), ['To read']);
