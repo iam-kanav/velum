@@ -361,20 +361,23 @@ Future<String?> showAddToCollectionSheet(
       Navigator.of(sheetContext).pop('new');
 
   Widget primaryButton(String label, VoidCallback onTap, {IconData? icon}) =>
-      SizedBox(
-        width: double.infinity,
-        height: 52,
-        child: FilledButton.icon(
-          onPressed: onTap,
-          icon: icon == null ? const SizedBox.shrink() : Icon(icon, size: 20),
-          label: Text(label),
-          style: FilledButton.styleFrom(
-            backgroundColor: _accent,
-            foregroundColor: Colors.white,
-            shape: const StadiumBorder(),
-            textStyle: GoogleFonts.inter(
-              fontSize: 15.5,
-              fontWeight: FontWeight.w600,
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: SizedBox(
+          width: double.infinity,
+          height: 52,
+          child: FilledButton.icon(
+            onPressed: onTap,
+            icon: icon == null ? const SizedBox.shrink() : Icon(icon, size: 20),
+            label: Text(label),
+            style: FilledButton.styleFrom(
+              backgroundColor: _accent,
+              foregroundColor: Colors.white,
+              shape: const StadiumBorder(),
+              textStyle: GoogleFonts.inter(
+                fontSize: 15.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
         ),
@@ -400,7 +403,9 @@ Future<String?> showAddToCollectionSheet(
             maxHeight: MediaQuery.of(sheetContext).size.height * 0.75,
           ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            // Rows span 12px from the edges so their tap highlight has room
+            // around the content; everything else adds 8px back (20 total).
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -416,18 +421,24 @@ Future<String?> showAddToCollectionSheet(
                   ),
                 ),
                 const SizedBox(height: 20),
-                Text(
-                  'Add to collection',
-                  style: GoogleFonts.inter(
-                    color: text,
-                    fontSize: 19,
-                    fontWeight: FontWeight.w700,
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    'Add to collection',
+                    style: GoogleFonts.inter(
+                      color: text,
+                      fontSize: 19,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  '$countLabel selected',
-                  style: GoogleFonts.inter(color: muted, fontSize: 13.5),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    '$countLabel selected',
+                    style: GoogleFonts.inter(color: muted, fontSize: 13.5),
+                  ),
                 ),
                 if (collections.isEmpty) ...[
                   const SizedBox(height: 24),
@@ -489,9 +500,10 @@ Future<String?> showAddToCollectionSheet(
                           ),
                         InkWell(
                           onTap: () => createNew(sheetContext),
-                          borderRadius: BorderRadius.circular(12),
-                          child: SizedBox(
-                            height: 60,
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            height: 64,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
                             child: Row(
                               children: [
                                 Container(
@@ -572,9 +584,10 @@ class _CollectionTickRow extends StatelessWidget {
     final text = theme.textColor;
     return InkWell(
       onTap: () => onTap(!ticked),
-      borderRadius: BorderRadius.circular(12),
-      child: SizedBox(
-        height: 60,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        height: 64,
+        padding: const EdgeInsets.symmetric(horizontal: 8),
         child: Row(
           children: [
             Container(
