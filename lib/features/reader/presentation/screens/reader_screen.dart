@@ -15,8 +15,6 @@ import 'package:velum/features/tts/data/models/tts_chunk.dart';
 import 'package:velum/features/tts/data/models/tts_settings.dart';
 import 'package:velum/features/tts/presentation/providers/tts_notifier.dart';
 import 'package:velum/features/tts/data/services/velum_audio_handler.dart';
-import 'package:velum/core/widgets/banner_ad_widget.dart';
-import 'package:velum/core/providers/ad_notifier.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/models/highlight.dart';
 import '../../data/models/bookmark.dart';
@@ -38,8 +36,6 @@ const Color _accent = AppColors.accent;
 /// Reader bottom bar (progress line + controls row).
 const double _barHeight = 96;
 
-/// "Hide ads" link (30) + banner (50) below the bottom bar.
-const double _adAreaHeight = 80;
 
 class ReaderScreen extends StatefulWidget {
   final String assetPath;
@@ -273,10 +269,6 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _onTtsStateChanged() {
     if (_ttsNotifier != null) {
       _updateTtsHighlight(_ttsNotifier!);
-      // Reset ad-free inactivity timer when audio is playing
-      if (_ttsNotifier!.isPlaying) {
-        context.read<AdNotifier>().onAudioPlaying();
-      }
     }
   }
 
@@ -370,62 +362,6 @@ class _ReaderScreenState extends State<ReaderScreen>
         notifier.jumpToChapter(chapters[result.chapterIndex]);
       }
     }
-  }
-
-  void _showRemoveAdsDialog(ReaderTheme readerTheme) {
-    final adNotifier = context.read<AdNotifier>();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: readerTheme.backgroundColor,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Support the Developer',
-          style: TextStyle(
-            color: readerTheme.textColor,
-            fontSize: 18,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        content: Text(
-          'Watch a short ad to hide banner ads for this session. '
-          'This helps support me as an independent developer and keeps Velum free!',
-          style: TextStyle(
-            color: readerTheme.textColor.withAlpha(180),
-            fontSize: 14,
-            height: 1.5,
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: Text(
-              'Not now',
-              style: TextStyle(color: readerTheme.textColor.withAlpha(120)),
-            ),
-          ),
-          FilledButton.icon(
-            onPressed: adNotifier.isRewardedAdReady
-                ? () async {
-                    Navigator.of(ctx).pop();
-                    await adNotifier.showRewardedAd();
-                  }
-                : null,
-            style: FilledButton.styleFrom(
-              backgroundColor: _accent,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-              ),
-            ),
-            icon: const Icon(Icons.play_circle_outline, size: 18),
-            label: Text(
-              adNotifier.isRewardedAdReady ? 'Watch Ad' : 'Loading...',
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   /// Animate page turn - direction: -1 for next (left), 1 for prev (right)
@@ -704,8 +640,6 @@ class _ReaderScreenState extends State<ReaderScreen>
     final notifier = context.watch<ReaderNotifier>();
     // Force UI visible during tutorial so spotlight positions are correct
     final showUI = _showTutorial ? true : notifier.showUI;
-    final adShown = context.select<AdNotifier, bool>((a) => a.showBanner);
-    final adSpace = adShown ? _adAreaHeight : 0.0;
     final settings = context.watch<SettingsNotifier>().settings;
     final readerTheme = settings.readerTheme;
 
@@ -725,8 +659,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                   // Sit right on top of the bar (or the ad area when the bar
                   // is hidden). Scaffold already adds the system inset + 16.
                   bottomMargin: showUI
-                      ? _barHeight + adSpace - 16
-                      : adSpace + 8,
+                      ? _barHeight - 16
+                      : 8,
                   isOverlayOpen:
                       _showColorPicker || _showSearch || _showBookComplete,
                   readerTheme: readerTheme,
@@ -1023,44 +957,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                   ],
                 ),
               ),
-              if (adShown)
-                SizedBox(
-                  height: _adAreaHeight,
-                  child: Column(
-                    children: [
-                      SizedBox(
-                        height: _adAreaHeight - 50,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => _showRemoveAdsDialog(readerTheme),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.favorite_border,
-                                size: 14,
-                                color: readerTheme.textColor.withAlpha(100),
-                              ),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Hide ads for this session',
-                                style: TextStyle(
-                                  fontSize: 12.5,
-                                  color: readerTheme.textColor.withAlpha(100),
-                                  decoration: TextDecoration.underline,
-                                  decorationColor: readerTheme.textColor
-                                      .withAlpha(60),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const BannerAdWidget(),
-                    ],
-                  ),
-                ),
-              // Keep the bar and ad clear of the system gesture/nav bar.
+              // Keep the bar clear of the system gesture/nav bar.
               SizedBox(height: MediaQuery.of(context).padding.bottom),
             ],
           ),

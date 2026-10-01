@@ -4,11 +4,18 @@ set -e
 CW=${1:-violet}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 SRC="$ROOT/branding/logo/colourways"
-R="${SVG_RENDER_PY:?set SVG_RENDER_PY to a render_png.py}"
+# SVG -> PNG renderer: rsvg-convert (brew install librsvg) by default.
+# Override with SVG_RENDER='cmd {in} {out} {size}' to use another tool.
+SVG_RENDER=${SVG_RENDER:-'rsvg-convert -w {size} -h {size} -o {out} {in}'}
 CACHE=$(mktemp -d)
 render() { # variant size -> path
-  local out="$CACHE/$1-$2.png"
-  [ -f "$out" ] || python3 "$R" "$SRC/velum-$CW-$1.svg" -o "$out" --size "$2" --backend chrome >/dev/null 2>&1
+  local out="$CACHE/$1-$2.png" cmd
+  if [ ! -f "$out" ]; then
+    cmd=${SVG_RENDER//\{in\}/"$SRC/velum-$CW-$1.svg"}
+    cmd=${cmd//\{out\}/"$out"}
+    cmd=${cmd//\{size\}/"$2"}
+    eval "$cmd" >/dev/null 2>&1
+  fi
   echo "$out"
 }
 opaque() { # strip alpha via jpeg round-trip (iOS icons must be opaque)

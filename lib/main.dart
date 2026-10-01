@@ -1,10 +1,8 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'package:audio_service/audio_service.dart';
-import 'package:velum/core/services/ad_service.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 
@@ -22,7 +20,6 @@ import 'features/tts/data/services/device_tts_engine.dart';
 import 'features/tts/data/services/edge_tts_engine.dart';
 import 'features/tts/data/services/velum_audio_handler.dart';
 
-import 'core/providers/ad_notifier.dart';
 import 'features/library/data/services/collection_service.dart';
 
 late VelumAudioHandler audioHandler;
@@ -30,8 +27,6 @@ late VelumAudioHandler audioHandler;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Start the ads SDK without blocking the first frame; ads load once it's ready.
-  unawaited(AdService().initialize());
 
   // Initialize SharedPreferences
   final prefs = await SharedPreferences.getInstance();
@@ -104,7 +99,6 @@ class MainApp extends StatelessWidget {
             CollectionService(context.read<SharedPreferences>()),
           ),
         ),
-        ChangeNotifierProvider(create: (_) => AdNotifier()),
         Provider<VelumAudioHandler>.value(value: audioHandler),
       ],
       child: const VelumApp(),
