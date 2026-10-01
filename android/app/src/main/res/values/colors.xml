@@ -1,4 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- Launch screen background; the middle of the icon's violet gradient -->
+    <color name="splash_background">#5B3DE3</color>
 </resources>
