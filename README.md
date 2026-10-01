@@ -81,7 +81,7 @@ flutter test
   ```bash
   dart run build_runner build --delete-conflicting-outputs
   ```
-- **App icon.** The master artwork and scripts live in `branding/logo/`. `install_icons.sh` regenerates every Android, iOS and web icon.
+- **App icon.** The master artwork and scripts live in `branding/logo/`. `install_icons.sh` regenerates every Android and web icon.
 - **Gradle downloads time out?** Some networks break Java's IPv6. Run builds with `JAVA_TOOL_OPTIONS="-Djava.net.preferIPv4Stack=true"`.
 
 </details>

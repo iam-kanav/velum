@@ -37,7 +37,6 @@ for d in android/app/src/main/res assets/icons/android/res; do
   for f in $d/mipmap-*/ic_launcher_monochrome.png; do place "$f" monochrome; done
 done
 place assets/icons/android/play_store_512.png square
-for f in ios/Runner/Assets.xcassets/AppIcon.appiconset/*.png assets/icons/ios/*.png; do place "$f" square opaque; done
 for d in web/icons assets/icons/web; do
   for f in $d/*.png; do
     case "$(basename "$f")" in
