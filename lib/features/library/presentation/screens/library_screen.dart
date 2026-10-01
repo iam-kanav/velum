@@ -154,6 +154,72 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return colors[hash % colors.length];
   }
 
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  Widget _buildDrawer(ReaderTheme theme) {
+    Widget item(IconData icon, String label, String? subtitle, VoidCallback onTap) {
+      return ListTile(
+        leading: Icon(icon, color: theme.textColor),
+        title: Text(
+          label,
+          style: GoogleFonts.inter(
+            color: theme.textColor,
+            fontSize: 16,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        subtitle: subtitle == null
+            ? null
+            : Text(
+                subtitle,
+                style: GoogleFonts.inter(
+                  color: theme.textColor.withAlpha(120),
+                  fontSize: 12.5,
+                ),
+              ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+        onTap: () {
+          Navigator.of(context).pop(); // close the drawer
+          onTap();
+        },
+      );
+    }
+
+    return Drawer(
+      backgroundColor: theme.backgroundColor,
+      child: SafeArea(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
+              child: Text(
+                'Velum',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: theme.textColor,
+                ),
+              ),
+            ),
+            item(
+              Icons.note_add_outlined,
+              'New File',
+              'Paste text to listen to',
+              () => context.push('/editor'),
+            ),
+            item(
+              Icons.settings_outlined,
+              'Settings',
+              null,
+              () => context.push('/settings'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final settingsNotifier = context.watch<SettingsNotifier>();
@@ -162,7 +228,9 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final books = libraryNotifier.sortedAndFilteredBooks;
 
     return Scaffold(
+      key: _scaffoldKey,
       backgroundColor: theme.backgroundColor,
+      drawer: _buildDrawer(theme),
       body: RefreshIndicator(
         onRefresh: () => libraryNotifier.refresh(),
         color: _accent,
@@ -175,12 +243,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
               floating: false,
               pinned: true,
               backgroundColor: theme.backgroundColor,
+              automaticallyImplyLeading: false,
               leading: _selectionMode
                   ? IconButton(
                       icon: Icon(Icons.close, color: theme.textColor),
                       onPressed: _cancelSelection,
                     )
-                  : null,
+                  : IconButton(
+                      icon: Icon(Icons.menu, color: theme.textColor),
+                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+                      tooltip: 'Menu',
+                    ),
               title: _selectionMode
                   ? Text(
                       '${_selectedBooks.length} selected',
@@ -209,16 +282,29 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                 const SizedBox(width: 8),
               ],
-              flexibleSpace: FlexibleSpaceBar(
-                titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
-                title: Text(
-                  'Velum',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: theme.textColor,
-                  ),
-                ),
+              flexibleSpace: LayoutBuilder(
+                builder: (context, constraints) {
+                  // 1 when fully expanded, 0 when collapsed: slide the title
+                  // right as it collapses so it clears the menu button.
+                  final top = MediaQuery.of(context).padding.top;
+                  final t = ((constraints.maxHeight - top - kToolbarHeight) /
+                          (120.0 - kToolbarHeight))
+                      .clamp(0.0, 1.0);
+                  return FlexibleSpaceBar(
+                    titlePadding: EdgeInsets.only(
+                      left: 20 + 52 * (1 - t),
+                      bottom: 16,
+                    ),
+                    title: Text(
+                      'Velum',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: theme.textColor,
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
 

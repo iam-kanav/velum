@@ -31,14 +31,14 @@ import 'package:velum/features/reader/presentation/widgets/global_search_overlay
 import 'package:velum/features/reader/presentation/widgets/book_complete_overlay.dart';
 import 'package:velum/features/reader/presentation/widgets/tts_fab.dart';
 import 'package:velum/core/theme/app_colors.dart';
+import 'package:velum/features/notes/data/note_service.dart';
 
 const Color _accent = AppColors.accent;
 
 /// Reader bottom bar (progress line + controls row).
-const double _barHeight = 82;
+const double _barHeight = 96;
 
-/// "Hide ads" link (30) + banner (50). When ads are hidden the bottom bar
-/// grows by this much instead, so the layout looks the same either way.
+/// "Hide ads" link (30) + banner (50) below the bottom bar.
 const double _adAreaHeight = 80;
 
 class ReaderScreen extends StatefulWidget {
@@ -53,6 +53,10 @@ class ReaderScreen extends StatefulWidget {
 class _ReaderScreenState extends State<ReaderScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final WebViewController _controller;
+
+  /// A pasted file ("New File"): one page, no chapter swiping or
+  /// "finished the book" screen.
+  late final bool _isNote = NoteService.isNote(widget.assetPath);
   static String? _readerJs; // reader.js, loaded once
   String? _lastHtmlContent;
   double _savedScrollPosition = 0;
@@ -151,7 +155,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         if (chapterAfter == chapterBefore) {
           // Chapter didn't change → we were on the last chapter.
           _ttsNotifier!.stop();
-          if (mounted) setState(() => _showBookComplete = true);
+          if (mounted && !_isNote) setState(() => _showBookComplete = true);
           return;
         }
 
@@ -463,6 +467,8 @@ class _ReaderScreenState extends State<ReaderScreen>
               notifier.toggleUI();
               break;
             case 'next':
+              // Pasted files are a single page: no swiping between chapters.
+              if (_isNote) break;
               HapticFeedback.mediumImpact();
               final chapterBefore = notifier.currentChapter;
               notifier.nextChapter();
@@ -474,6 +480,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               }
               break;
             case 'prev':
+              if (_isNote) break;
               HapticFeedback.mediumImpact();
               _animatePageTurn(1); // Slide right
               notifier.previousChapter();
@@ -607,6 +614,18 @@ class _ReaderScreenState extends State<ReaderScreen>
     return true;
   }
 
+  /// Open the editor for this note; reload it if it was changed.
+  Future<void> _editNote() async {
+    await _ttsNotifier?.pause();
+    if (!mounted) return;
+    final changed = await context.push<bool>(
+      '/editor?path=${Uri.encodeComponent(widget.assetPath)}',
+    );
+    if (changed == true && mounted) {
+      await _readerNotifier?.loadBook(widget.assetPath);
+    }
+  }
+
   /// Play button: pause, resume, or start reading from what's on screen
   /// (the last spoken sentence if it's still visible, else the first one).
   Future<void> _onPlayPressed() async {
@@ -678,8 +697,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     // Force UI visible during tutorial so spotlight positions are correct
     final showUI = _showTutorial ? true : notifier.showUI;
     final adShown = context.select<AdNotifier, bool>((a) => a.showBanner);
-    // Without the ad, the bar takes over its space so nothing moves.
-    final barHeight = _barHeight + (adShown ? 0 : _adAreaHeight);
+    final adSpace = adShown ? _adAreaHeight : 0.0;
     final settings = context.watch<SettingsNotifier>().settings;
     final readerTheme = settings.readerTheme;
 
@@ -699,8 +717,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                   // Sit right on top of the bar (or the ad area when the bar
                   // is hidden). Scaffold already adds the system inset + 16.
                   bottomMargin: showUI
-                      ? _barHeight + _adAreaHeight - 16
-                      : _adAreaHeight - 16,
+                      ? _barHeight + adSpace - 16
+                      : adSpace + 8,
                   isOverlayOpen:
                       _showColorPicker || _showSearch || _showBookComplete,
                   readerTheme: readerTheme,
@@ -757,6 +775,16 @@ class _ReaderScreenState extends State<ReaderScreen>
                         ),
                         centerTitle: true,
                         actions: [
+                          // Edit (only for files created in Velum)
+                          if (_isNote)
+                            IconButton(
+                              icon: Icon(
+                                Icons.edit_outlined,
+                                color: readerTheme.textColor,
+                              ),
+                              tooltip: 'Edit',
+                              onPressed: _editNote,
+                            ),
                           // Bookmark current position
                           IconButton(
                             icon: Icon(
@@ -794,14 +822,14 @@ class _ReaderScreenState extends State<ReaderScreen>
                     // Layer 3: Bottom Bar (Animated) - Uses Reader Theme
                     AnimatedPositioned(
                       duration: const Duration(milliseconds: 200),
-                      bottom: showUI ? 0 : -barHeight,
+                      bottom: showUI ? 0 : -_barHeight,
                       left: 0,
                       right: 0,
-                      height: barHeight,
+                      height: _barHeight,
                       child: Container(
-                        // Solid, like the ad area it replaces when ads are off,
-                        // so page text never shows through the empty space.
-                        color: readerTheme.backgroundColor,
+                        color: readerTheme.backgroundColor.withAlpha(
+                          (0.95 * 255).round(),
+                        ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           mainAxisAlignment: MainAxisAlignment.start,
@@ -819,7 +847,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                             Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 20),
                               child: SizedBox(
-                                height: 78,
+                                height: _barHeight - 2,
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
@@ -828,6 +856,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                                       key: _highlightsIconKey,
                                       icon: Icon(
                                         Icons.bookmark,
+                                        size: 28,
                                         color: readerTheme.textColor,
                                       ),
                                       onPressed: () async {
@@ -880,7 +909,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
                                               style: TextStyle(
-                                                fontSize: 14,
+                                                fontSize: 16,
                                                 color: readerTheme.textColor,
                                               ),
                                             ),
@@ -889,7 +918,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                                               Text(
                                                 'Chapter ${notifier.currentChapterIndex + 1} of ${notifier.currentBook!.Chapters!.length}',
                                                 style: TextStyle(
-                                                  fontSize: 11,
+                                                  fontSize: 12.5,
                                                   color: readerTheme.textColor.withAlpha(120),
                                                 ),
                                               ),
@@ -902,6 +931,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                                       key: _settingsIconKey,
                                       icon: Icon(
                                         Icons.settings,
+                                        size: 28,
                                         color: readerTheme.textColor,
                                       ),
                                       onPressed: () {

@@ -1,176 +1,183 @@
+<div align="center">
+
+<img src="branding/logo/velum-icon-512.png" width="112" alt="Velum app icon" />
+
 # Velum
 
-**A beautiful, distraction-free EPUB reader with cloud-powered neural Text-to-Speech, built with Flutter.**
+**A calm, distraction-free ebook reader that reads your books out loud.**
 
-<p align="center">
-  <img src="Mockup Screenshots/Light/light_library.png" width="30%" alt="Library – Light" />
-  <img src="Mockup Screenshots/Dark/dark_reader.png" width="30%" alt="Reader – Dark" />
-  <img src="Mockup Screenshots/Sepia/sepia_tts_settings.png" width="30%" alt="TTS Settings – Sepia" />
-</p>
+Open an EPUB, press play, and follow along as each sentence lights up.
 
----
+![Flutter](https://img.shields.io/badge/Flutter-3.44-02569B?logo=flutter&logoColor=white)
+![Dart](https://img.shields.io/badge/Dart-3.8-0175C2?logo=dart&logoColor=white)
+![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white)
+![Version](https://img.shields.io/badge/version-1.0.0-5B3DE3)
 
-## Features at a Glance
+[Features](#-features) · [Screenshots](#-screenshots) · [Read-aloud](#-read-aloud) · [Getting started](#-getting-started) · [How it works](#-how-it-works)
 
-- 📚 **Library** — auto-scan your device for EPUBs or import manually, with search, sort, pinning, and per-book reading progress
-- 📖 **Reader** — WebView-based rendering with full HTML/CSS support, swipe chapter navigation, and deep typography controls
-- 🔊 **Text-to-Speech** — your phone's own speech engine (Edge neural voices optional) with synced sentence/paragraph highlighting and lock-screen controls
-- 🖍️ **Highlights & Bookmarks** — five highlight colours plus positional bookmarks, browsable from a single panel
-- 🔍 **Global Search** — search every chapter at once with snippet previews
-- 🎨 **Theming** — Light, Dark, and Sepia, applied independently to the app UI and the reading view
+<br/>
 
----
+<img src="docs/screenshots/library.png" width="30%" alt="Library" />&nbsp;
+<img src="docs/screenshots/read-aloud.png" width="30%" alt="Reading with sentence highlighting" />&nbsp;
+<img src="docs/screenshots/new-file.png" width="30%" alt="Pasting a document into New File" />
 
-## Text-to-Speech Engine
-
-Velum reads aloud with the **speech engine installed on your phone** (via [`flutter_tts`](https://pub.dev/packages/flutter_tts)) — e.g. Speech Services by Google or Samsung TTS. It works offline and starts speaking almost instantly. On Android you can pick any installed engine and any of its downloaded voices.
-
-**Microsoft Edge neural voices** (via [`edge_tts`](https://pub.dev/packages/edge_tts)) are still available as an **experimental** option in the TTS settings. They sound more natural but need an internet connection and take longer to start.
-
-### How playback works
-
-1. **One source of truth** — when a chapter is rendered, each paragraph is split into sentence spans and the same pass records the spoken text for each span, so the voice and the highlight always point at the same sentence.
-2. **Chunking** — chapter text is spoken sentence by sentence or paragraph by paragraph (matching the highlight mode).
-3. **Device engine** — each chunk is handed straight to the phone's engine; pausing stops the current sentence and resuming restarts it.
-4. **Edge engine (experimental)** — chunks are synthesized to MP3 in the background (3 at a time, starting from the reading position), kept in a 40-entry LRU cache, and played with [`just_audio`](https://pub.dev/packages/just_audio).
-5. **System integration** — [`audio_service`](https://pub.dev/packages/audio_service) (`VelumAudioHandler`) provides lock-screen / notification controls, and [`audio_session`](https://pub.dev/packages/audio_session) handles interruptions from other apps.
-
-### TTS features
-
-- Play/Pause floating button in the reader with a synthesis progress indicator
-- Choose the speech engine and voice, with one-tap voice preview
-- Adjustable speed (0.2×–2.0×), pitch, and volume
-- **Sentence-level or paragraph-level highlighting** that auto-scrolls to follow along
-- Press Play to start from the first sentence on screen; double-tap any paragraph or sentence to jump playback to that point
-- Scroll away while listening and the page stops following the voice; tap **Back to reading** to return
-- **Sleep timer** — stop after 15, 30 or 60 minutes, or at the end of the chapter
-- Auto-advance to the next chapter when the current one finishes
-- Optionally stop when another app takes audio focus
-- Book and chapter shown on the lock screen and in the media notification
-
-<p align="center">
-  <img src="Mockup Screenshots/Light/light_tts_settings.png" width="28%" alt="TTS Settings – Light" />
-  <img src="Mockup Screenshots/Dark/dark_tts_settings.png" width="28%" alt="TTS Settings – Dark" />
-  <img src="Mockup Screenshots/Sepia/sepia_tts_settings.png" width="28%" alt="TTS Settings – Sepia" />
-</p>
+</div>
 
 ---
 
-## Library
+## ✨ Features
 
-<p align="center">
-  <img src="Mockup Screenshots/Light/light_library.png" width="28%" alt="Library – Light" />
-  <img src="Mockup Screenshots/Dark/dark_library.png" width="28%" alt="Library – Dark" />
-  <img src="Mockup Screenshots/Sepia/sepia_library.png" width="28%" alt="Library – Sepia" />
-</p>
+- 🔊 **Read-aloud with live highlighting.** Uses your phone's own voice, works offline, and starts instantly. Each sentence or paragraph lights up as it's spoken.
+- ▶️ **Starts where you are.** Press play to begin at the first sentence on screen, or double-tap any sentence to jump straight to it.
+- 📝 **New File.** Paste anything (a whole Google Doc, an article, notes) and listen to it like a book. Headings, lists and bold/italic come along; colours and clutter don't.
+- 📚 **Library.** Finds the EPUBs on your device automatically, with covers, search, sorting and pinning.
+- 📖 **Remembers your place.** Every chapter keeps its own scroll position and read-aloud spot, even after you close the app.
+- 🖍️ **Highlights and bookmarks.** Five highlight colours and exact-position bookmarks, all in one panel.
+- 🔍 **Search the whole book** with snippets that take you right to the match.
+- 🎨 **Light, dark and sepia** themes, plus fonts, size, spacing and margins, including your own font files.
 
-- Auto-detect all EPUB files on your device, or import them manually via file picker
-- Metadata and cover extraction run in a background isolate, stored in a **Hive** database
-- Search your library in real time by title or author
-- Sort by recently read or alphabetically; pin favourites to the top
-- Multi-select for bulk delete or pin/unpin
-- Reading progress (chapter + scroll position) saved automatically per book
+## 📱 Screenshots
 
----
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/library.png" width="240" alt="Library" /><br/><sub><b>Library</b></sub></td>
+    <td align="center"><img src="docs/screenshots/menu.png" width="240" alt="Side menu" /><br/><sub><b>Side menu</b></sub></td>
+    <td align="center"><img src="docs/screenshots/new-file.png" width="240" alt="New File" /><br/><sub><b>New File: paste a document</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/note-reader.png" width="240" alt="Pasted document in the reader" /><br/><sub><b>…then read or listen to it</b></sub></td>
+    <td align="center"><img src="docs/screenshots/read-aloud.png" width="240" alt="Read-aloud" /><br/><sub><b>Read-aloud highlighting</b></sub></td>
+    <td align="center"><img src="docs/screenshots/dark.png" width="240" alt="Dark theme" /><br/><sub><b>Dark theme · Back to reading</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/sepia.png" width="240" alt="Sepia theme" /><br/><sub><b>Sepia theme</b></sub></td>
+    <td align="center"><img src="docs/screenshots/tts-settings.png" width="240" alt="Voice settings" /><br/><sub><b>Voice settings</b></sub></td>
+    <td align="center"><img src="docs/screenshots/sleep-timer.png" width="240" alt="Sleep timer" /><br/><sub><b>Sleep timer</b></sub></td>
+  </tr>
+  <tr>
+    <td align="center" colspan="3"><img src="docs/screenshots/reader-settings.png" width="240" alt="Reader settings" /><br/><sub><b>Reader settings</b></sub></td>
+  </tr>
+</table>
 
-## Reader
+## 🔊 Read-aloud
 
-<p align="center">
-  <img src="Mockup Screenshots/Light/light_reader.png" width="28%" alt="Reader – Light" />
-  <img src="Mockup Screenshots/Dark/dark_reader.png" width="28%" alt="Reader – Dark" />
-  <img src="Mockup Screenshots/Sepia/sepia_reader.png" width="28%" alt="Reader – Sepia" />
-</p>
-
-- Full HTML/CSS rendering in a WebView, with image and external-link support
-- EPUB parsing (via `epubx`) offloaded to a background isolate — no UI jank on large books
-- Swipe left/right to move between chapters with smooth slide animations
-- Tap anywhere to show/hide the UI — bars auto-hide after a few seconds
-- Table of Contents modal for jumping straight to any chapter
-- Select text and highlight in **five colours** (yellow, green, blue, pink, orange)
-- **Bookmarks** — save your exact position and jump back to it from the combined Highlights & Bookmarks panel
-- Global search across all chapters with snippet previews and chapter/position info
-- Scroll position restored exactly where you left off
-- First-launch reader tutorial and a celebration screen when you finish a book
-
----
-
-## Settings & Customization
-
-<p align="center">
-  <img src="Mockup Screenshots/Light/light_reader_settings.png" width="28%" alt="Reader Settings – Light" />
-  <img src="Mockup Screenshots/Dark/darj_reader_settings.png" width="28%" alt="Reader Settings – Dark" />
-  <img src="Mockup Screenshots/Sepia/sepia_reader_settings.png" width="28%" alt="Reader Settings – Sepia" />
-</p>
-
-- Independent **app theme** and **reader theme** (Light / Dark / Sepia)
-- Font selection: Serif (Merriweather), Sans-Serif (Inter), Monospace (Roboto Mono), or **import your own TTF**
-- Font size (12–32 px), line height (1.0–2.5), and paragraph spacing with live preview
-- Horizontal margins (0–40 px) and text alignment (left / justified)
-- In-reader settings modal (TTS + Reader tabs) — no need to leave your book
-- All settings persist across sessions
-- Guided onboarding on first launch: library setup, notification permission for TTS controls, and theme selection
-
----
-
-## Tech Stack
-
-| Concern | Solution |
+| | |
 |---|---|
-| Framework | Flutter (Dart SDK ^3.8.1) |
-| State management | `provider` (ChangeNotifier) |
-| Navigation | `go_router` with an onboarding redirect guard |
-| EPUB parsing | `epubx`, run in background isolates |
-| Content rendering | `webview_flutter` + injected `assets/js/reader.js` (gestures, highlights, TTS sync) |
-| Text-to-Speech | `flutter_tts` (device engines); `edge_tts` (experimental) |
-| Audio playback | `just_audio` + `audio_service` + `audio_session` |
-| Library storage | `hive` (with automatic migration from SharedPreferences) |
-| Settings / highlights / bookmarks | `shared_preferences` |
-| Monetization | `google_mobile_ads` (banner in the reader; rewarded ad grants an ad-free session) |
+| **Voices** | Any speech engine installed on the phone (e.g. Speech Services by Google, Samsung TTS) and any of its downloaded voices, with a one-tap preview. |
+| **Speed** | 0.2× to 4×, in 0.1× steps. Pitch and volume adjustable too. |
+| **Highlighting** | Sentence by sentence or paragraph by paragraph. The page follows the voice. |
+| **Scroll freely** | Scroll away while it reads and the page stays put. A **Back to reading** button takes you back. |
+| **Sleep timer** | Stop after 15, 30 or 60 minutes, or at the end of the chapter. It pauses, so you can pick up where you dozed off. |
+| **Interruptions** | Notification sounds don't stop it. Calls pause it and it resumes afterwards. |
+| **Lock screen** | Play, pause and skip paragraphs from the lock screen and notification. The book and chapter title are shown. |
+| **Auto-continue** | Moves on to the next chapter by itself. |
 
-## Project Structure
+> [!NOTE]
+> **Microsoft Edge voices** are available as an *Experimental* option at the bottom of the voice settings. They sound more natural but need an internet connection and take longer to start.
 
-The codebase follows a feature-first layout, with each feature split into `data` (models + services) and `presentation` (providers + UI) layers:
+## 🚀 Getting started
 
-```
-lib/
-├── main.dart                    # Bootstrap: ads, Hive, audio_service, DI via MultiProvider
-├── core/
-│   ├── providers/               # AdNotifier (ad-free session state)
-│   ├── router/                  # go_router config + onboarding redirect
-│   ├── services/                # AdService (AdMob)
-│   ├── theme/                   # App-wide themes and colors
-│   └── widgets/                 # BannerAdWidget
-└── features/
-    ├── library/
-    │   ├── data/                # ScannedBook (Hive model), LibraryService (scan/import/progress)
-    │   └── presentation/        # LibraryNotifier, LibraryScreen
-    ├── onboarding/
-    │   └── presentation/        # First-launch onboarding flow
-    ├── reader/
-    │   ├── data/                # EpubService (isolate parsing), Highlight & Bookmark models/services
-    │   └── presentation/        # ReaderNotifier, ReaderScreen (WebView), modals & overlays
-    ├── settings/
-    │   ├── data/                # ReaderSettings, CustomFont
-    │   └── presentation/        # SettingsNotifier, settings screen & in-reader modal
-    └── tts/
-        ├── data/                # TtsSettings, TtsService (Edge TTS + just_audio), VelumAudioHandler
-        └── presentation/        # TtsNotifier, TTS FAB, TTS settings UI
-
-assets/js/reader.js              # Injected WebView script: swipe/tap gestures, highlight
-                                 # rendering, double-tap-to-speak, TTS highlight sync
-```
-
-## Getting Started
+**Requirements:** [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ and an Android device or emulator (Android 7.0+).
 
 ```bash
+git clone https://github.com/iam-kanav/velum.git
+cd velum
 flutter pub get
 flutter run
 ```
 
-Hive type adapters (`*.g.dart`) are committed; regenerate them after model changes with:
+Build a release APK (one per CPU type; most phones use `arm64-v8a`):
 
 ```bash
-dart run build_runner build --delete-conflicting-outputs
+flutter build apk --release --split-per-abi
 ```
 
-> **Note:** TTS requires an internet connection — audio is synthesized by Microsoft's Edge TTS cloud service, not an on-device engine.
+Run the tests:
+
+```bash
+flutter test
+```
+
+<details>
+<summary><b>More developer notes</b></summary>
+
+<br/>
+
+- **Hive adapters** (`*.g.dart`) are committed. Regenerate after changing a model:
+  ```bash
+  dart run build_runner build --delete-conflicting-outputs
+  ```
+- **Ads.** Without real ad unit IDs, builds show Google's test ads. Pass the real ones at build time:
+  ```bash
+  flutter build apk --release \
+    --dart-define=AD_BANNER_ANDROID=ca-app-pub-xxx/yyy \
+    --dart-define=AD_REWARDED_ANDROID=ca-app-pub-xxx/zzz
+  ```
+- **App icon.** The master artwork and scripts live in `branding/logo/`. `install_icons.sh` regenerates every Android, iOS and web icon.
+- **Gradle downloads time out?** Some networks break Java's IPv6. Run builds with `JAVA_TOOL_OPTIONS="-Djava.net.preferIPv4Stack=true"`.
+
+</details>
+
+## 🧩 How it works
+
+```mermaid
+flowchart LR
+    A[EPUB file] -->|parsed in background| B[Chapters]
+    B --> C[Chapter processor]
+    C -->|sentence spans| D[Page in WebView]
+    C -->|sentence text| E[Read-aloud engine]
+    E -->|now speaking #n| D
+```
+
+- **One source of truth.** When a chapter opens, a single pass marks every sentence on the page *and* records the text the voice will speak, so the highlight and the voice can't drift apart. 16 automated tests guard this.
+- **Fast opening.** Only chapter text is read up front. Pictures are pulled from the book when a chapter needs them.
+- **Your own files.** A pasted document is saved as a small one-chapter EPUB alongside its editable source, so it opens, plays and searches like any book.
+
+<details>
+<summary><b>Tech stack</b></summary>
+
+<br/>
+
+| Area | Package |
+|---|---|
+| Framework | Flutter, Dart 3.8 |
+| State | `provider` |
+| Navigation | `go_router` |
+| EPUB parsing | `epubx` (background isolate, lazy images) |
+| Rendering | `webview_flutter` + `assets/js/reader.js` |
+| Speech | `flutter_tts` (device), `edge_tts` (experimental) |
+| Audio | `just_audio`, `audio_service`, `audio_session` |
+| Storage | `hive`, `shared_preferences` |
+| Ads | `google_mobile_ads` |
+
+</details>
+
+<details>
+<summary><b>Project structure</b></summary>
+
+<br/>
+
+```
+lib/
+├── main.dart                 # Startup: storage, audio service, providers
+├── core/                     # Router, theme, ads
+└── features/
+    ├── library/              # Library screen, scanning, imports
+    ├── notes/                # New File: paste editor + note storage
+    ├── onboarding/           # First-launch setup
+    ├── reader/               # Reader screen, chapter processor, highlights, bookmarks
+    ├── settings/             # Reader settings and fonts
+    └── tts/                  # Speech engines, playback, voice settings
+assets/js/
+├── reader.js                 # Page script: gestures, highlights, follow mode
+└── editor.html               # New File paste area and clean-up
+test/                         # Sentence alignment and note tests
+```
+
+</details>
+
+---
+
+<div align="center">
+<sub>Made with Flutter · Screenshots show public-domain books from <a href="https://www.gutenberg.org">Project Gutenberg</a></sub>
+</div>

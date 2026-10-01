@@ -110,10 +110,38 @@ document.body.addEventListener('click', function(e) {
 // Following: the page scrolls to keep the spoken sentence in view, until the
 // user scrolls it out of view themselves. Flutter then shows "Back to reading";
 // following resumes when that's tapped or the sentence is back on screen.
+//
+// While the user is scrolling (finger down, or the page still gliding after
+// they let go) the page never auto-scrolls; once it settles, following stays
+// on only if the spoken sentence is still on screen.
 window._ttsFollow = true;
-var _lastTouch = 0;
-document.addEventListener('touchstart', function() { _lastTouch = Date.now(); }, { passive: true });
-document.addEventListener('touchmove', function() { _lastTouch = Date.now(); }, { passive: true });
+var _touching = false, _userScrolling = false, _touchY = 0, _settleTimer;
+
+document.addEventListener('touchstart', function(e) {
+  _touching = true;
+  _touchY = e.touches[0].clientY;
+}, { passive: true });
+document.addEventListener('touchmove', function(e) {
+  if (Math.abs(e.touches[0].clientY - _touchY) > 8) _userScrolling = true;
+}, { passive: true });
+function endTouch() {
+  _touching = false;
+  scheduleSettle();
+}
+document.addEventListener('touchend', endTouch, { passive: true });
+document.addEventListener('touchcancel', endTouch, { passive: true });
+
+// Called on every scroll event and when the finger lifts: once nothing has
+// moved for a moment, decide whether to keep following.
+function scheduleSettle() {
+  clearTimeout(_settleTimer);
+  _settleTimer = setTimeout(function() {
+    if (_touching || !_userScrolling) return;
+    _userScrolling = false;
+    var cur = document.querySelector('.tts-highlight');
+    setFollow(cur ? inView(cur) : true);
+  }, 250);
+}
 
 function inView(el) {
   var r = el.getBoundingClientRect();
@@ -137,6 +165,7 @@ function showTts(els) {
   clearTts();
   for (var i = 0; i < els.length; i++) els[i].classList.add('tts-highlight');
   var el = els[0];
+  if (_userScrolling) return; // never fight the user's finger
   if (window._ttsFollow) {
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } else if (inView(el)) {
@@ -165,6 +194,7 @@ window.ttsClearHighlight = function() {
 };
 
 window.ttsFollowNow = function() {
+  _userScrolling = false;
   setFollow(true);
   var cur = document.querySelector('.tts-highlight');
   if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -203,12 +233,8 @@ window.addEventListener('scroll', function() {
   clearTimeout(scrollTimeout);
   scrollTimeout = setTimeout(function() {
     ReaderChannel.postMessage('scroll:' + window.scrollY);
-    // Only scrolls the user started (incl. their momentum) toggle following
-    if (Date.now() - _lastTouch < 3000) {
-      var cur = document.querySelector('.tts-highlight');
-      if (cur) setFollow(inView(cur));
-    }
   }, 200);
+  scheduleSettle();
 });
 
 // Search functions

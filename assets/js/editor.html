@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<style>
+  :root { --text: #2d2d2d; --bg: #faf9f6; --muted: rgba(45,45,45,.45); --accent: #5B3DE3; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: 'Merriweather', Georgia, serif;
+    font-size: 18px; line-height: 1.6;
+    padding: 16px 20px 40px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  #editor { outline: 0; min-height: 60vh; word-wrap: break-word; }
+  #editor:empty::before { content: attr(data-placeholder); color: var(--muted); }
+  #editor h1 { font-size: 1.5em; line-height: 1.3; }
+  #editor h2 { font-size: 1.25em; line-height: 1.35; }
+  #editor h3 { font-size: 1.1em; }
+  #editor blockquote { margin: 0 0 1em; padding-left: 14px; border-left: 3px solid var(--accent); }
+  #editor pre { white-space: pre-wrap; font-family: monospace; font-size: .9em; }
+  #editor a { color: var(--accent); }
+  #editor table { border-collapse: collapse; }
+  #editor td, #editor th { border: 1px solid var(--muted); padding: 4px 8px; }
+</style>
+</head>
+<body>
+<div id="editor" contenteditable="true" data-placeholder="Paste here…"></div>
+<script>
+var editor = document.getElementById('editor');
+document.execCommand('defaultParagraphSeparator', false, 'p');
+
+function post(msg) { if (window.Editor) Editor.postMessage(msg); }
+editor.addEventListener('input', function() { post('dirty'); });
+
+// ── Paste: keep structure (headings, lists, emphasis, links, tables),
+// drop colours, fonts, sizes, classes, images and scripts.
+var KEEP = { H1:1, H2:1, H3:1, H4:1, H5:1, H6:1, P:1, UL:1, OL:1, LI:1,
+  BLOCKQUOTE:1, PRE:1, CODE:1, B:1, STRONG:1, I:1, EM:1, U:1, S:1, BR:1,
+  A:1, HR:1, SUB:1, SUP:1, TABLE:1, THEAD:1, TBODY:1, TR:1, TD:1, TH:1 };
+var DROP = { SCRIPT:1, STYLE:1, META:1, LINK:1, TITLE:1, IMG:1, SVG:1,
+  VIDEO:1, AUDIO:1, IFRAME:1, OBJECT:1, BUTTON:1, INPUT:1, SELECT:1,
+  TEXTAREA:1, NOSCRIPT:1, HEAD:1 };
+var BLOCKS = /^(P|DIV|H[1-6]|UL|OL|LI|BLOCKQUOTE|PRE|TABLE|TR|HR|SECTION|ARTICLE)$/;
+
+function cleanNode(node, out) {
+  for (var c = node.firstChild; c; c = c.nextSibling) {
+    if (c.nodeType === 3) { out.appendChild(document.createTextNode(c.nodeValue)); continue; }
+    if (c.nodeType !== 1 || DROP[c.tagName]) continue;
+    var tag = c.tagName, style = (c.getAttribute('style') || '').toLowerCase();
+    // Google Docs wraps everything in a <b style="font-weight:normal">.
+    if ((tag === 'B' || tag === 'STRONG') && /font-weight:\s*(normal|[1-4]00)/.test(style)) tag = 'SPAN';
+    var target = out;
+    if (KEEP[tag]) {
+      target = document.createElement(tag);
+      if (tag === 'A' && c.getAttribute('href')) target.setAttribute('href', c.getAttribute('href'));
+      out.appendChild(target);
+    } else if (tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE') {
+      // A div holding only inline content is a paragraph; otherwise unwrap.
+      var hasBlock = false;
+      for (var k = c.firstChild; k; k = k.nextSibling) {
+        if (k.nodeType === 1 && BLOCKS.test(k.tagName)) { hasBlock = true; break; }
+      }
+      if (!hasBlock) { target = document.createElement('P'); out.appendChild(target); }
+    } else if (tag === 'SPAN') {
+      // Bold/italic done with CSS (Google Docs, Word) becomes real tags.
+      if (/font-weight:\s*(bold|[6-9]00)/.test(style)) { target = document.createElement('B'); out.appendChild(target); }
+      if (/font-style:\s*italic/.test(style)) { var it = document.createElement('I'); target.appendChild(it); target = it; }
+    }
+    cleanNode(c, target);
+  }
+}
+
+function escapeHtml(t) {
+  return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+editor.addEventListener('paste', function(e) {
+  var data = e.clipboardData;
+  if (!data) return;
+  e.preventDefault();
+  var html = data.getData('text/html');
+  var out;
+  if (html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    var box = document.createElement('div');
+    cleanNode(doc.body, box);
+    out = box.innerHTML;
+  } else {
+    // Plain text: each line becomes a paragraph.
+    out = data.getData('text/plain').split(/\r?\n/)
+      .filter(function(l) { return l.trim().length; })
+      .map(function(l) { return '<p>' + escapeHtml(l) + '</p>'; }).join('');
+  }
+  if (out) document.execCommand('insertHTML', false, out);
+});
+
+// ── Called from Flutter.
+window.setTheme = function(text, bg, muted) {
+  var r = document.documentElement.style;
+  r.setProperty('--text', text); r.setProperty('--bg', bg); r.setProperty('--muted', muted);
+};
+window.setDoc = function(html) { editor.innerHTML = html; };
+window.getDoc = function() {
+  post('doc:' + JSON.stringify({ html: editor.innerHTML, text: editor.innerText.trim() }));
+};
+window.focusEditor = function() { editor.focus(); };
+</script>
+</body>
+</html>

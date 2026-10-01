@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../models/scanned_book.dart';
+import '../../../notes/data/note_service.dart';
 
 /// Top-level function for compute() — parses EPUB bytes in a background isolate.
 /// Must be top-level (not a method) so Dart can send it to the isolate.
@@ -332,8 +333,29 @@ class LibraryService {
     }
   }
 
+  /// Add a note to the library, or update its title if it's already there
+  /// (keeping reading progress and pin).
+  Future<void> saveNote(String filePath, String title) async {
+    final existing = _booksBox.get(filePath);
+    await _booksBox.put(
+      filePath,
+      existing?.copyWith(title: title) ??
+          ScannedBook(
+            filePath: filePath,
+            title: title,
+            author: 'Your file',
+            addedAt: DateTime.now(),
+            lastReadTime: DateTime.now(),
+          ),
+    );
+  }
+
   Future<void> removeBook(String filePath) async {
     await _booksBox.delete(filePath);
+    if (NoteService.isNote(filePath)) {
+      await const NoteService().delete(filePath);
+      return;
+    }
     await _addToDeletedPaths(filePath);
 
     // Clean up the copied file if it's in our books directory

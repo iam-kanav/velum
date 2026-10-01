@@ -19,6 +19,7 @@ import '../../features/reader/presentation/providers/reader_notifier.dart';
 import '../../features/reader/presentation/providers/highlight_notifier.dart';
 import '../../features/reader/presentation/providers/bookmark_notifier.dart';
 import '../../features/tts/presentation/providers/tts_notifier.dart';
+import '../../features/notes/presentation/note_editor_screen.dart';
 
 final GlobalKey<NavigatorState> _rootNavigatorKey = GlobalKey<NavigatorState>();
 
@@ -85,6 +86,11 @@ GoRouter createAppRouter(LibraryNotifier libraryNotifier) {
             child: ReaderScreen(assetPath: path),
           );
         },
+      ),
+      GoRoute(
+        path: '/editor',
+        builder: (context, state) =>
+            NoteEditorScreen(path: state.uri.queryParameters['path']),
       ),
       GoRoute(
         path: '/settings',

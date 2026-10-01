@@ -201,6 +201,11 @@ class LibraryNotifier extends ChangeNotifier {
     _loadBooks();
   }
 
+  Future<void> saveNote(String filePath, String title) async {
+    await _libraryService.saveNote(filePath, title);
+    _loadBooks();
+  }
+
   Future<void> removeBook(ScannedBook book) async {
     await _libraryService.removeBook(book.filePath);
     _loadBooks();
