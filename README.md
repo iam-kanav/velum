@@ -19,7 +19,7 @@ Open an EPUB, press play, and follow along as each sentence lights up.
 
 <img src="docs/screenshots/library.png" width="30%" alt="Library" />&nbsp;
 <img src="docs/screenshots/read-aloud.png" width="30%" alt="Reading with sentence highlighting" />&nbsp;
-<img src="docs/screenshots/new-file.png" width="30%" alt="Pasting a document into New File" />
+<img src="docs/screenshots/new-note.png" width="30%" alt="A pasted document in the note editor" />
 
 </div>
 
@@ -29,7 +29,7 @@ Open an EPUB, press play, and follow along as each sentence lights up.
 
 - 🔊 **Read-aloud with live highlighting.** Uses your phone's own voice, works offline, and starts instantly. Each sentence or paragraph lights up as it's spoken.
 - ▶️ **Starts where you are.** Press play to begin at the first sentence on screen, or double-tap any sentence to jump straight to it.
-- 📝 **New File.** Paste anything (a whole Google Doc, an article, notes) and listen to it like a book. Headings, lists and bold/italic come along; colours and clutter don't.
+- 📝 **Create New.** Tap **+** → **Create New**, then write or paste anything (a whole Google Doc, an article, notes) and listen to it like a book. Headings, lists and bold/italic come along; colours and clutter don't.
 - 📚 **Library.** Finds the EPUBs on your device automatically, with covers, search, sorting and pinning.
 - 📖 **Remembers your place.** Every chapter keeps its own scroll position and read-aloud spot, even after you close the app.
 - 🖍️ **Highlights and bookmarks.** Five highlight colours and exact-position bookmarks, all in one panel.
@@ -40,24 +40,18 @@ Open an EPUB, press play, and follow along as each sentence lights up.
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/library.png" width="240" alt="Library" /><br/><sub><b>Library</b></sub></td>
-    <td align="center"><img src="docs/screenshots/menu.png" width="240" alt="Side menu" /><br/><sub><b>Side menu</b></sub></td>
-    <td align="center"><img src="docs/screenshots/new-file.png" width="240" alt="New File" /><br/><sub><b>New File: paste a document</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/library.png" alt="Library" /><br/><sub><b>Your library</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/read-aloud.png" alt="Read-aloud" /><br/><sub><b>Each sentence lights up as it's read</b></sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/voice-settings.png" alt="Voice settings" /><br/><sub><b>Voice, speed and pitch</b></sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/note-reader.png" width="240" alt="Pasted document in the reader" /><br/><sub><b>…then read or listen to it</b></sub></td>
-    <td align="center"><img src="docs/screenshots/read-aloud.png" width="240" alt="Read-aloud" /><br/><sub><b>Read-aloud highlighting</b></sub></td>
-    <td align="center"><img src="docs/screenshots/dark.png" width="240" alt="Dark theme" /><br/><sub><b>Dark theme · Back to reading</b></sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/sepia.png" width="240" alt="Sepia theme" /><br/><sub><b>Sepia theme</b></sub></td>
-    <td align="center"><img src="docs/screenshots/tts-settings.png" width="240" alt="Voice settings" /><br/><sub><b>Voice settings</b></sub></td>
-    <td align="center"><img src="docs/screenshots/sleep-timer.png" width="240" alt="Sleep timer" /><br/><sub><b>Sleep timer</b></sub></td>
-  </tr>
-  <tr>
-    <td align="center" colspan="3"><img src="docs/screenshots/reader-settings.png" width="240" alt="Reader settings" /><br/><sub><b>Reader settings</b></sub></td>
+    <td align="center"><img src="docs/screenshots/add.png" alt="Add sheet" /><br/><sub><b>Tap + for From Files or Create New</b></sub></td>
+    <td align="center"><img src="docs/screenshots/new-note.png" alt="Note editor" /><br/><sub><b>Paste a document. Formatting is kept</b></sub></td>
+    <td></td>
   </tr>
 </table>
+
+<p align="center"><img src="docs/screenshots/themes.png" width="90%" alt="Light, dark and sepia themes" /><br/><sub><b>Light, dark and sepia</b></sub></p>
 
 ## 🔊 Read-aloud
 
@@ -131,7 +125,7 @@ flowchart LR
 
 - **One source of truth.** When a chapter opens, a single pass marks every sentence on the page *and* records the text the voice will speak, so the highlight and the voice can't drift apart. 16 automated tests guard this.
 - **Fast opening.** Only chapter text is read up front. Pictures are pulled from the book when a chapter needs them.
-- **Your own files.** A pasted document is saved as a small one-chapter EPUB alongside its editable source, so it opens, plays and searches like any book.
+- **Your own notes.** A note (titled, or "Untitled Note" by default) is saved as a small one-chapter EPUB alongside its editable source, so it opens, plays and searches like any book.
 
 <details>
 <summary><b>Tech stack</b></summary>
@@ -163,14 +157,14 @@ lib/
 ├── core/                     # Router, theme, ads
 └── features/
     ├── library/              # Library screen, scanning, imports
-    ├── notes/                # New File: paste editor + note storage
+    ├── notes/                # Create New: note editor + note storage
     ├── onboarding/           # First-launch setup
     ├── reader/               # Reader screen, chapter processor, highlights, bookmarks
     ├── settings/             # Reader settings and fonts
     └── tts/                  # Speech engines, playback, voice settings
 assets/js/
 ├── reader.js                 # Page script: gestures, highlights, follow mode
-└── editor.html               # New File paste area and clean-up
+└── editor.html               # Note editor: title, writing area, paste clean-up
 test/                         # Sentence alignment and note tests
 ```
 

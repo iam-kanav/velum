@@ -11,8 +11,8 @@ import '../../library/presentation/providers/library_notifier.dart';
 import '../../settings/presentation/providers/settings_notifier.dart';
 import '../data/note_service.dart';
 
-/// Paste a text ("New File") — e.g. a whole Google Doc — so it can be read
-/// and listened to like a book. Pass [path] to edit an existing one.
+/// Write or paste a text ("Create New") — e.g. a whole Google Doc — so it can
+/// be read and listened to like a book. Pass [path] to edit an existing one.
 class NoteEditorScreen extends StatefulWidget {
   final String? path;
 
@@ -65,7 +65,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       final note = await _notes.load(path);
       if (note != null) {
         await _controller.runJavaScript(
-          'window.setDoc(${jsonEncode(note.html)});',
+          'window.setDoc(${jsonEncode(note.title)}, ${jsonEncode(note.html)});',
         );
       }
     }
@@ -93,12 +93,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       final doc = await pending.future.timeout(const Duration(seconds: 5));
       final text = (doc['text'] as String? ?? '').trim();
       if (text.isEmpty) {
-        _showMessage('Paste something first');
+        _showMessage('Write or paste something first');
         return;
       }
-      // Named after its first line, shortened.
-      var title = text.split('\n').first.trim();
-      if (title.length > 60) title = '${title.substring(0, 57).trimRight()}…';
+      var title = (doc['title'] as String? ?? '').trim();
+      if (title.isEmpty) title = 'Untitled Note';
 
       final path = await _notes.save(
         Note(title, doc['html'] as String),
@@ -182,7 +181,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
           foregroundColor: theme.textColor,
           elevation: 0,
           title: Text(
-            widget.path == null ? 'New file' : 'Edit file',
+            widget.path == null ? 'New note' : 'Edit note',
             style: TextStyle(fontSize: 16, color: theme.textColor),
           ),
           actions: [

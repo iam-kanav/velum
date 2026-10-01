@@ -154,69 +154,95 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return colors[hash % colors.length];
   }
 
-  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final GlobalKey _addButtonKey = GlobalKey();
 
-  Widget _buildDrawer(ReaderTheme theme) {
-    Widget item(IconData icon, String label, String? subtitle, VoidCallback onTap) {
-      return ListTile(
-        leading: Icon(icon, color: theme.textColor),
-        title: Text(
-          label,
-          style: GoogleFonts.inter(
-            color: theme.textColor,
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-          ),
-        ),
-        subtitle: subtitle == null
-            ? null
-            : Text(
-                subtitle,
-                style: GoogleFonts.inter(
-                  color: theme.textColor.withAlpha(120),
-                  fontSize: 12.5,
-                ),
-              ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 4),
+  /// "+" button: a small popup menu just above it with the two ways to add
+  /// something.
+  void _showAddMenu(ReaderTheme theme, LibraryNotifier notifier) {
+    final box = _addButtonKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final fabTopLeft = box.localToGlobal(Offset.zero);
+    final screen = MediaQuery.of(context).size;
+    final right = screen.width - (fabTopLeft.dx + box.size.width);
+    final bottom = screen.height - fabTopLeft.dy + 12;
+
+    Widget item(BuildContext menuContext, IconData icon, String label,
+        VoidCallback onTap) {
+      return InkWell(
         onTap: () {
-          Navigator.of(context).pop(); // close the drawer
+          Navigator.of(menuContext).pop();
           onTap();
         },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 22, color: _accent),
+              const SizedBox(width: 14),
+              Text(
+                label,
+                style: GoogleFonts.inter(
+                  color: theme.textColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
       );
     }
 
-    return Drawer(
-      backgroundColor: theme.backgroundColor,
-      child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 16),
-              child: Text(
-                'Velum',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: theme.textColor,
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Close menu',
+      barrierColor: Colors.black.withAlpha(25),
+      transitionDuration: const Duration(milliseconds: 160),
+      pageBuilder: (menuContext, _, _) => Stack(
+        children: [
+          Positioned(
+            right: right,
+            bottom: bottom,
+            child: Material(
+              color: theme == ReaderTheme.dark
+                  ? const Color(0xFF2A2A2A)
+                  : Colors.white,
+              elevation: 8,
+              shadowColor: Colors.black38,
+              borderRadius: BorderRadius.circular(20),
+              clipBehavior: Clip.antiAlias,
+              child: IntrinsicWidth(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    item(menuContext, Icons.folder_open_outlined, 'From Files',
+                        notifier.pickFiles),
+                    Divider(height: 1, color: theme.textColor.withAlpha(20)),
+                    item(menuContext, Icons.edit_note, 'Create New',
+                        () => context.push('/editor')),
+                  ],
                 ),
               ),
             ),
-            item(
-              Icons.note_add_outlined,
-              'New File',
-              'Paste text to listen to',
-              () => context.push('/editor'),
-            ),
-            item(
-              Icons.settings_outlined,
-              'Settings',
-              null,
-              () => context.push('/settings'),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
+      // Grow out of the + button.
+      transitionBuilder: (_, animation, _, child) {
+        final curved =
+            CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        return FadeTransition(
+          opacity: curved,
+          child: ScaleTransition(
+            scale: Tween(begin: 0.85, end: 1.0).animate(curved),
+            alignment: Alignment.bottomRight,
+            child: child,
+          ),
+        );
+      },
     );
   }
 
@@ -228,9 +254,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final books = libraryNotifier.sortedAndFilteredBooks;
 
     return Scaffold(
-      key: _scaffoldKey,
       backgroundColor: theme.backgroundColor,
-      drawer: _buildDrawer(theme),
       body: RefreshIndicator(
         onRefresh: () => libraryNotifier.refresh(),
         color: _accent,
@@ -249,11 +273,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       icon: Icon(Icons.close, color: theme.textColor),
                       onPressed: _cancelSelection,
                     )
-                  : IconButton(
-                      icon: Icon(Icons.menu, color: theme.textColor),
-                      onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-                      tooltip: 'Menu',
-                    ),
+                  : null,
               title: _selectionMode
                   ? Text(
                       '${_selectedBooks.length} selected',
@@ -282,29 +302,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   ),
                 const SizedBox(width: 8),
               ],
-              flexibleSpace: LayoutBuilder(
-                builder: (context, constraints) {
-                  // 1 when fully expanded, 0 when collapsed: slide the title
-                  // right as it collapses so it clears the menu button.
-                  final top = MediaQuery.of(context).padding.top;
-                  final t = ((constraints.maxHeight - top - kToolbarHeight) /
-                          (120.0 - kToolbarHeight))
-                      .clamp(0.0, 1.0);
-                  return FlexibleSpaceBar(
-                    titlePadding: EdgeInsets.only(
-                      left: 20 + 52 * (1 - t),
-                      bottom: 16,
-                    ),
-                    title: Text(
-                      'Velum',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: theme.textColor,
-                      ),
-                    ),
-                  );
-                },
+              flexibleSpace: FlexibleSpaceBar(
+                titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
+                title: Text(
+                  'Velum',
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: theme.textColor,
+                  ),
+                ),
               ),
             ),
 
@@ -439,7 +446,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
       floatingActionButton: !_selectionMode
           ? FloatingActionButton(
-              onPressed: () => libraryNotifier.pickFiles(),
+              key: _addButtonKey,
+              onPressed: libraryNotifier.isScanning
+                  ? null
+                  : () => _showAddMenu(theme, libraryNotifier),
               backgroundColor: _accent,
               child: libraryNotifier.isScanning
                   ? const SizedBox(

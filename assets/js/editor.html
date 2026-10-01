@@ -13,6 +13,11 @@
     padding: 16px 20px 40px;
     -webkit-tap-highlight-color: transparent;
   }
+  #title {
+    width: 100%; border: 0; outline: 0; background: transparent; color: var(--text);
+    font: 700 26px/1.3 'Merriweather', Georgia, serif; padding: 8px 0 12px;
+  }
+  #title::placeholder { color: var(--muted); }
   #editor { outline: 0; min-height: 60vh; word-wrap: break-word; }
   #editor:empty::before { content: attr(data-placeholder); color: var(--muted); }
   #editor h1 { font-size: 1.5em; line-height: 1.3; }
@@ -26,13 +31,20 @@
 </style>
 </head>
 <body>
-<div id="editor" contenteditable="true" data-placeholder="Paste here…"></div>
+<input id="title" placeholder="Title" autocomplete="off" enterkeyhint="next">
+<div id="editor" contenteditable="true" data-placeholder="Start writing… or paste your content."></div>
 <script>
 var editor = document.getElementById('editor');
+var title = document.getElementById('title');
 document.execCommand('defaultParagraphSeparator', false, 'p');
 
 function post(msg) { if (window.Editor) Editor.postMessage(msg); }
 editor.addEventListener('input', function() { post('dirty'); });
+title.addEventListener('input', function() { post('dirty'); });
+// Enter in the title moves on to the text.
+title.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); editor.focus(); }
+});
 
 // ── Paste: keep structure (headings, lists, emphasis, links, tables),
 // drop colours, fonts, sizes, classes, images and scripts.
@@ -101,11 +113,12 @@ window.setTheme = function(text, bg, muted) {
   var r = document.documentElement.style;
   r.setProperty('--text', text); r.setProperty('--bg', bg); r.setProperty('--muted', muted);
 };
-window.setDoc = function(html) { editor.innerHTML = html; };
+window.setDoc = function(t, html) { title.value = t; editor.innerHTML = html; };
 window.getDoc = function() {
-  post('doc:' + JSON.stringify({ html: editor.innerHTML, text: editor.innerText.trim() }));
+  post('doc:' + JSON.stringify({ title: title.value.trim(), html: editor.innerHTML,
+    text: editor.innerText.trim() }));
 };
-window.focusEditor = function() { editor.focus(); };
+window.focusEditor = function() { (title.value ? editor : title).focus(); };
 </script>
 </body>
 </html>
