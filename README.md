@@ -12,7 +12,9 @@ Open a book, press play, and follow along as each sentence lights up.
 ![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white)
 ![License](https://img.shields.io/badge/license-Apache%202.0-5B3DE3)
 
-[Features](#-features) · [Screenshots](#-screenshots) · [Getting started](#-getting-started) · [More features](#-more-features) · [License](#-license)
+<a href="https://github.com/iam-kanav/velum/releases/latest"><img src="https://img.shields.io/badge/Download-APK-5B3DE3?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" /></a>
+
+[Features](#-features) · [Screenshots](#-screenshots) · [Download](#️-download) · [Getting started](#-getting-started) · [More features](#-more-features) · [License](#-license)
 
 <br/>
 
@@ -48,6 +50,10 @@ Open a book, press play, and follow along as each sentence lights up.
     <td align="center" width="33%"><img src="docs/screenshots/highlight.png" alt="Highlight pill (dark)" /><br/><sub><b>Highlight right below your selection</b></sub></td>
   </tr>
 </table>
+
+## ⬇️ Download
+
+Grab the latest APK from [**Releases**](https://github.com/iam-kanav/velum/releases/latest). Most phones need the `arm64-v8a` file. Requires Android 7.0+.
 
 ## 🚀 Getting started
 
