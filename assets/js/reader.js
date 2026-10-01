@@ -47,12 +47,31 @@ document.addEventListener('touchend', function(e) {
   }
 }, { passive: true });
 
+// A tap between lines or beside the text lands on the paragraph itself; pick
+// the sentence nearest the finger so double-tap starts where the user meant.
+function sentenceAt(el, x, y) {
+  if (!el || el.hasAttribute('data-sent')) return el;
+  var spans = el.querySelectorAll('[data-sent]');
+  var best = el, bestDist = Infinity;
+  for (var i = 0; i < spans.length; i++) {
+    var rects = spans[i].getClientRects();
+    for (var j = 0; j < rects.length; j++) {
+      var r = rects[j];
+      var dx = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
+      var dy = y < r.top ? r.top - y : (y > r.bottom ? y - r.bottom : 0);
+      var d = dx * dx + dy * dy;
+      if (d < bestDist) { bestDist = d; best = spans[i]; }
+    }
+  }
+  return best;
+}
+
 document.body.addEventListener('click', function(e) {
   var now = Date.now();
 
   // Check for double-tap on TTS paragraph/sentence FIRST
   // (before selection check, so browser's double-click text selection doesn't interfere)
-  var target = e.target.closest('[data-para]');
+  var target = sentenceAt(e.target.closest('[data-para]'), e.clientX, e.clientY);
 
   if (target && lastTapTarget === target && (now - lastTapTime) < 400) {
     // Double tap detected - skip to this paragraph/sentence

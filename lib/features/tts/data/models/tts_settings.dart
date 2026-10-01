@@ -24,42 +24,62 @@ class TtsSettings extends Equatable {
   final double pitch;
   final double volume;
   final String language;
-  final String? voiceName;
   final TtsHighlightMode highlightMode;
   final bool autoContinue; // Auto-advance to next chapter when current finishes
   final bool stopOnAudioFocusLoss; // Stop TTS when other audio plays
+
+  /// Experimental: use Microsoft Edge online voices instead of the device engine.
+  final bool useEdgeTts;
+
+  /// Android TTS engine package; null means the system default.
+  final String? deviceEngine;
+  final String? deviceVoice;
+  final String? edgeVoice;
 
   const TtsSettings({
     this.speechRate = 0.5,
     this.pitch = 1.0,
     this.volume = 1.0,
     this.language = 'en-US',
-    this.voiceName,
     this.highlightMode = TtsHighlightMode.sentence,
     this.autoContinue = true,
     this.stopOnAudioFocusLoss = true,
+    this.useEdgeTts = false,
+    this.deviceEngine,
+    this.deviceVoice,
+    this.edgeVoice,
   });
+
+  /// Voice selected for the active engine (null = engine default).
+  String? get voiceName => useEdgeTts ? edgeVoice : deviceVoice;
 
   TtsSettings copyWith({
     double? speechRate,
     double? pitch,
     double? volume,
     String? language,
-    String? voiceName,
-    bool clearVoice = false,
     TtsHighlightMode? highlightMode,
     bool? autoContinue,
     bool? stopOnAudioFocusLoss,
+    bool? useEdgeTts,
+    String? deviceEngine,
+    String? deviceVoice,
+    String? edgeVoice,
+    bool clearDeviceVoice = false,
+    bool clearEdgeVoice = false,
   }) {
     return TtsSettings(
       speechRate: speechRate ?? this.speechRate,
       pitch: pitch ?? this.pitch,
       volume: volume ?? this.volume,
       language: language ?? this.language,
-      voiceName: clearVoice ? null : (voiceName ?? this.voiceName),
       highlightMode: highlightMode ?? this.highlightMode,
       autoContinue: autoContinue ?? this.autoContinue,
       stopOnAudioFocusLoss: stopOnAudioFocusLoss ?? this.stopOnAudioFocusLoss,
+      useEdgeTts: useEdgeTts ?? this.useEdgeTts,
+      deviceEngine: deviceEngine ?? this.deviceEngine,
+      deviceVoice: clearDeviceVoice ? null : (deviceVoice ?? this.deviceVoice),
+      edgeVoice: clearEdgeVoice ? null : (edgeVoice ?? this.edgeVoice),
     );
   }
 
@@ -69,9 +89,12 @@ class TtsSettings extends Equatable {
     pitch,
     volume,
     language,
-    voiceName,
     highlightMode,
     autoContinue,
     stopOnAudioFocusLoss,
+    useEdgeTts,
+    deviceEngine,
+    deviceVoice,
+    edgeVoice,
   ];
 }

@@ -12,8 +12,6 @@ import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
 import 'package:velum/features/settings/presentation/widgets/settings_modal.dart';
 import 'package:velum/features/tts/presentation/providers/tts_notifier.dart';
-import 'package:velum/features/tts/data/services/tts_service.dart';
-import 'package:velum/features/tts/data/models/tts_settings.dart';
 import 'package:velum/features/tts/data/services/velum_audio_handler.dart';
 import 'package:velum/core/widgets/banner_ad_widget.dart';
 import 'package:velum/core/providers/ad_notifier.dart';
@@ -45,6 +43,7 @@ class ReaderScreen extends StatefulWidget {
 class _ReaderScreenState extends State<ReaderScreen>
     with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final WebViewController _controller;
+  static String? _readerJs; // reader.js, loaded once
   String? _lastHtmlContent;
   double _savedScrollPosition = 0;
   bool _shouldRestoreScroll = false;
@@ -109,7 +108,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _readerNotifier = context.read<ReaderNotifier>();
-      _readerNotifier?.loadBook(widget.assetPath);
+      _readerNotifier!.addListener(_onReaderChanged);
+      _readerNotifier!.loadBook(widget.assetPath);
 
       // Load highlights for this book and listen for removals
       _highlightNotifier = context.read<HighlightNotifier>();
@@ -142,12 +142,11 @@ class _ReaderScreenState extends State<ReaderScreen>
 
         // Successfully moved to next chapter — animate and continue playing.
         _animatePageTurn(-1);
-        _ttsNotifier!.clearContent();
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
-            final text = readerNotifier.extractStructuredText();
-            if (text.isNotEmpty) {
-              _ttsNotifier!.loadContent(text);
+            final paragraphs = readerNotifier.ttsParagraphs;
+            if (paragraphs.isNotEmpty) {
+              _ttsNotifier!.loadContent(paragraphs);
 
               // Update notification metadata for new chapter
               context.read<VelumAudioHandler>().setMediaMetadata(
@@ -170,6 +169,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _readerNotifier?.saveReadingPosition(_savedScrollPosition);
 
     WidgetsBinding.instance.removeObserver(this);
+    _readerNotifier?.removeListener(_onReaderChanged);
     _highlightNotifier?.removeListener(_onHighlightChanged);
     _ttsNotifier?.removeListener(_onTtsStateChanged);
     _ttsNotifier?.onChapterComplete = null;
@@ -178,6 +178,23 @@ class _ReaderScreenState extends State<ReaderScreen>
     _searchFocusNode.dispose();
     _pageAnimController.dispose();
     super.dispose();
+  }
+
+  Object? _shownChapter;
+
+  /// Read-aloud belongs to the chapter it was started in, so any chapter
+  /// change (swipe, contents, search, highlights, bookmarks, start over)
+  /// stops it. Otherwise the old chapter's positions get highlighted on the
+  /// new page. Auto-continue reloads and restarts it after the change.
+  void _onReaderChanged() {
+    final chapter = _readerNotifier?.currentChapter;
+    if (identical(chapter, _shownChapter)) return;
+    _shownChapter = chapter;
+    final tts = _ttsNotifier;
+    if (tts != null && tts.chunks.isNotEmpty) {
+      tts.stop();
+      tts.clearContent();
+    }
   }
 
   /// Listener for TTS state changes - updates WebView highlight via JS
@@ -261,8 +278,6 @@ class _ReaderScreenState extends State<ReaderScreen>
     });
   }
 
-  // _buildGlobalSearchOverlay removed
-
   void _onSearchResultTap(GlobalSearchResult result) {
     final notifier = context.read<ReaderNotifier>();
     final chapters = notifier.currentBook?.Chapters;
@@ -281,8 +296,6 @@ class _ReaderScreenState extends State<ReaderScreen>
       // Jump to the target chapter, scroll after it loads
       _pendingScrollPercent = result.positionPercent;
       if (result.chapterIndex < chapters.length) {
-        context.read<TtsNotifier>().stop();
-        context.read<TtsNotifier>().clearContent();
         notifier.jumpToChapter(chapters[result.chapterIndex]);
       }
     }
@@ -391,8 +404,6 @@ class _ReaderScreenState extends State<ReaderScreen>
                 // Already on the last chapter — show completion screen
                 setState(() => _showBookComplete = true);
               } else {
-                context.read<TtsNotifier>().stop();
-                context.read<TtsNotifier>().clearContent();
                 _animatePageTurn(-1);
               }
               break;
@@ -400,8 +411,6 @@ class _ReaderScreenState extends State<ReaderScreen>
               HapticFeedback.mediumImpact();
               _animatePageTurn(1); // Slide right
               notifier.previousChapter();
-              context.read<TtsNotifier>().stop();
-              context.read<TtsNotifier>().clearContent();
               break;
             default:
               // Handle external URL opening
@@ -446,39 +455,10 @@ class _ReaderScreenState extends State<ReaderScreen>
                     : null;
                 if (paraIndex != null) {
                   final ttsNotifier = context.read<TtsNotifier>();
-                  final readerNotifier = context.read<ReaderNotifier>();
-
-                  // Load content if not already loaded
                   if (ttsNotifier.chunks.isEmpty) {
-                    final text = readerNotifier.extractStructuredText();
-                    if (text.isNotEmpty) {
-                      // Find the chunk index for the tapped paragraph so
-                      // synthesis starts from there, not from the top.
-                      final chunks = TtsService.chunkText(
-                        text,
-                        ttsNotifier.settings.highlightMode,
-                      );
-                      int startChunk = 0;
-                      if (sentIndex != null) {
-                        startChunk = chunks.indexWhere(
-                          (c) => c.paragraphIndex == paraIndex && c.sentenceIndex == sentIndex,
-                        );
-                      }
-                      if (startChunk < 0) {
-                        startChunk = chunks.indexWhere(
-                          (c) => c.paragraphIndex == paraIndex,
-                        );
-                      }
-                      ttsNotifier.loadContent(text, startFromChunk: startChunk.clamp(0, chunks.length));
-                    }
+                    ttsNotifier.loadContent(notifier.ttsParagraphs);
                   }
-
-                  // Jump to position and start playing
-                  if (sentIndex != null) {
-                    ttsNotifier.jumpToSentence(paraIndex, sentIndex);
-                  } else {
-                    ttsNotifier.jumpToParagraph(paraIndex);
-                  }
+                  ttsNotifier.jumpTo(paraIndex, sentIndex);
                 }
               }
           }
@@ -487,8 +467,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       ..setNavigationDelegate(
         NavigationDelegate(
           onNavigationRequest: (NavigationRequest request) {
-            // Allow the initial data: URI content load
-            if (request.url.startsWith('data:')) {
+            // Allow the chapter content load itself
+            if (request.url.startsWith('data:') ||
+                request.url.startsWith('about:')) {
               return NavigationDecision.navigate;
             }
             // Block all other URLs from loading in the WebView.
@@ -496,11 +477,14 @@ class _ReaderScreenState extends State<ReaderScreen>
             return NavigationDecision.prevent;
           },
           onPageFinished: (String url) async {
-            // Load and inject JS from asset
-            final jsString = await rootBundle.loadString('assets/js/reader.js');
-            _controller.runJavaScript(jsString);
+            _readerJs ??= await rootBundle.loadString('assets/js/reader.js');
+            await _controller.runJavaScript(_readerJs!);
 
             _isPageReady = true; // JS is now ready
+            // Re-apply the TTS highlight: the new page starts without one,
+            // and updates were skipped while it was loading.
+            _lastHighlightKey = null;
+            if (_ttsNotifier != null) _updateTtsHighlight(_ttsNotifier!);
             // Restore saved highlights for current chapter
             _restoreHighlights();
             // Restore scroll position after page loads
@@ -535,10 +519,6 @@ class _ReaderScreenState extends State<ReaderScreen>
       );
   }
 
-  // CSS is now baked into HTML in _loadChapterContent - no separate injection needed
-
-  // JS is loaded directly from asset in _initController
-
   /// Update WebView TTS highlight based on current TTS state and mode
   void _updateTtsHighlight(TtsNotifier ttsNotifier) {
     // Don't try to highlight if page/JS isn't ready yet
@@ -546,43 +526,22 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     final currentChunk = ttsNotifier.currentChunk;
     final currentPara = currentChunk?.paragraphIndex;
-    final currentSent = currentChunk?.sentenceIndex;
-    final isSentenceMode =
-        ttsNotifier.settings.highlightMode == TtsHighlightMode.sentence;
+    // null in paragraph mode, so the whole paragraph is highlighted
+    final sentence = currentChunk?.sentenceIndex;
 
-    // Determine what to highlight
     if (ttsNotifier.isPlaying || ttsNotifier.isPaused) {
-      if (currentPara != null) {
-        // Create a unique key for current position
-        final currentKey = isSentenceMode && currentSent != null
-            ? '$currentPara-$currentSent'
-            : '$currentPara';
-
-        if (currentKey != _lastHighlightKey) {
-          _lastHighlightKey = currentKey;
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (isSentenceMode && currentSent != null) {
-              _controller.runJavaScript(
-                'if(window.ttsHighlightSentence) window.ttsHighlightSentence($currentPara, $currentSent);',
-              );
-            } else {
-              _controller.runJavaScript(
-                'if(window.ttsHighlightParagraph) window.ttsHighlightParagraph($currentPara);',
-              );
-            }
-          });
-        }
-      }
-    } else {
-      // TTS is stopped - clear highlight
-      if (_lastHighlightKey != null) {
-        _lastHighlightKey = null;
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          _controller.runJavaScript(
-            'if(window.ttsClearHighlight) window.ttsClearHighlight();',
-          );
-        });
-      }
+      if (currentPara == null) return;
+      final key = '$currentPara-$sentence';
+      if (key == _lastHighlightKey) return;
+      _lastHighlightKey = key;
+      _controller.runJavaScript(
+        sentence != null
+            ? 'window.ttsHighlightSentence($currentPara, $sentence);'
+            : 'window.ttsHighlightParagraph($currentPara);',
+      );
+    } else if (_lastHighlightKey != null) {
+      _lastHighlightKey = null;
+      _controller.runJavaScript('window.ttsClearHighlight();');
     }
   }
 
@@ -1022,8 +981,6 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  // _buildTtsFab, _buildColorPicker, _buildBookCompleteScreen extracted to widgets
-
   /// Open a URL in the device's external browser via Android Intent.
   void _openExternalUrl(String url) {
     if (Platform.isAndroid) {
@@ -1161,63 +1118,52 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   bool _isInitialLoad = true;
   ReaderSettings? _lastSettings;
+  String? _lastFontCss;
+
+  static String _hex(Color c) =>
+      '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
+
+  /// @font-face rule for the selected custom font ('' when not using one).
+  /// Kept in its own <style> so slider changes don't resend the font data.
+  String _buildFontCss(ReaderSettings settings) {
+    if (settings.font != ReaderFont.custom ||
+        settings.selectedCustomFontId == null) {
+      return '';
+    }
+    final selectedFont = settings.customFonts
+        .where((f) => f.id == settings.selectedCustomFontId)
+        .firstOrNull;
+    if (selectedFont == null) return '';
+
+    if (selectedFont.path != _cachedFontPath || _cachedFontBase64 == null) {
+      try {
+        final fontFile = File(selectedFont.path);
+        // Sync read is fine here — the result is cached after the first read
+        _cachedFontBase64 = fontFile.existsSync()
+            ? base64Encode(fontFile.readAsBytesSync())
+            : null;
+        _cachedFontPath = selectedFont.path;
+      } catch (e) {
+        debugPrint('Error loading custom font: $e');
+        _cachedFontBase64 = null;
+      }
+    }
+    if (_cachedFontBase64 == null) return '';
+    return "@font-face { font-family: 'CustomFont'; "
+        "src: url(data:font/ttf;base64,$_cachedFontBase64) format('truetype'); }";
+  }
 
   /// Build dynamic CSS string from current settings.
   /// Used both for initial HTML and for live JS-based CSS updates.
-  String _buildDynamicCss(ReaderSettings settings) {
-    final r = (settings.theme.textColor.r * 255.0).round().clamp(0, 255);
-    final g = (settings.theme.textColor.g * 255.0).round().clamp(0, 255);
-    final b = (settings.theme.textColor.b * 255.0).round().clamp(0, 255);
-    final themeColorHex =
-        '#${r.toRadixString(16).padLeft(2, '0')}${g.toRadixString(16).padLeft(2, '0')}${b.toRadixString(16).padLeft(2, '0')}';
-
-    final bgR = (settings.theme.backgroundColor.r * 255.0).round().clamp(0, 255);
-    final bgG = (settings.theme.backgroundColor.g * 255.0).round().clamp(0, 255);
-    final bgB = (settings.theme.backgroundColor.b * 255.0).round().clamp(0, 255);
-    final bgColorHex =
-        '#${bgR.toRadixString(16).padLeft(2, '0')}${bgG.toRadixString(16).padLeft(2, '0')}${bgB.toRadixString(16).padLeft(2, '0')}';
-
+  String _buildDynamicCss(ReaderSettings settings, {required bool hasCustomFont}) {
+    final themeColorHex = _hex(settings.theme.textColor);
+    final bgColorHex = _hex(settings.theme.backgroundColor);
     final linkColor = settings.theme == ReaderTheme.dark ? '#64B5F6' : '#1976D2';
-
-    String fontFamily = settings.font.fontFamily;
-    String fontCss = '';
-
-    if (settings.font == ReaderFont.custom &&
-        settings.selectedCustomFontId != null) {
-      try {
-        final selectedFont = settings.customFonts.firstWhere(
-          (f) => f.id == settings.selectedCustomFontId,
-          orElse: () => throw Exception('Font not found'),
-        );
-
-        if (selectedFont.path != _cachedFontPath || _cachedFontBase64 == null) {
-          final fontFile = File(selectedFont.path);
-          if (fontFile.existsSync()) {
-            // readAsBytesSync is fine here — result is cached after first read
-            final fontBytes = fontFile.readAsBytesSync();
-            _cachedFontBase64 = base64Encode(fontBytes);
-            _cachedFontPath = selectedFont.path;
-          }
-        }
-
-        if (_cachedFontBase64 != null) {
-          fontFamily = 'CustomFont';
-          fontCss = '''
-            @font-face {
-              font-family: 'CustomFont';
-              src: url(data:font/ttf;base64,$_cachedFontBase64) format('truetype');
-            }
-          ''';
-        }
-      } catch (e) {
-        debugPrint('Error loading custom font: $e');
-        fontFamily = 'serif';
-      }
-    }
+    final fontFamily = settings.font == ReaderFont.custom
+        ? (hasCustomFont ? 'CustomFont' : 'serif')
+        : settings.font.fontFamily;
 
     return '''
-    $fontCss
-
     * {
       color: $themeColorHex !important;
       background-color: transparent !important;
@@ -1266,20 +1212,13 @@ class _ReaderScreenState extends State<ReaderScreen>
       max-width: 100% !important;
     }
 
-    p, [data-para], .tts-para, .tts-paragraph {
+    p, [data-para], .tts-para {
       margin-top: 0 !important;
       margin-bottom: ${settings.paragraphSpacing}em !important;
       text-indent: 0 !important;
     }
 
     /* TTS Highlighting Styles */
-    .tts-paragraph {
-      transition: background-color 0.3s ease, border-radius 0.3s ease;
-      border-radius: 4px;
-      padding: 2px 4px;
-      margin: -2px -4px;
-    }
-
     .tts-highlight {
       background-color: rgba(76, 175, 80, 0.25) !important;
       box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
@@ -1305,33 +1244,26 @@ class _ReaderScreenState extends State<ReaderScreen>
     ''';
   }
 
+  static String _jsString(String value) => value
+      .replaceAll('\\', '\\\\')
+      .replaceAll("'", "\\'")
+      .replaceAll('\n', '\\n');
+
   /// Update WebView CSS dynamically via JavaScript without reloading the page.
   /// Called when only settings change (e.g. slider drags for font size, line height).
   void _updateCssViaJs(ReaderSettings settings) {
-    final css = _buildDynamicCss(settings);
-    final escaped = css
-        .replaceAll('\\', '\\\\')
-        .replaceAll("'", "\\'")
-        .replaceAll('\n', '\\n');
+    final fontCss = _buildFontCss(settings);
+    if (fontCss != _lastFontCss) {
+      _lastFontCss = fontCss;
+      _controller.runJavaScript(
+        "document.getElementById('velum-font').textContent = '${_jsString(fontCss)}';",
+      );
+    }
+    final css = _buildDynamicCss(settings, hasCustomFont: fontCss.isNotEmpty);
     _controller.runJavaScript(
-      "document.getElementById('velum-css').textContent = '$escaped';",
-    );
-
-    // Update inline body styles for immediate visual sync
-    final bgR = (settings.theme.backgroundColor.r * 255.0).round().clamp(0, 255);
-    final bgG = (settings.theme.backgroundColor.g * 255.0).round().clamp(0, 255);
-    final bgB = (settings.theme.backgroundColor.b * 255.0).round().clamp(0, 255);
-    final bgColorHex =
-        '#${bgR.toRadixString(16).padLeft(2, '0')}${bgG.toRadixString(16).padLeft(2, '0')}${bgB.toRadixString(16).padLeft(2, '0')}';
-
-    final r = (settings.theme.textColor.r * 255.0).round().clamp(0, 255);
-    final g = (settings.theme.textColor.g * 255.0).round().clamp(0, 255);
-    final b = (settings.theme.textColor.b * 255.0).round().clamp(0, 255);
-    final themeColorHex =
-        '#${r.toRadixString(16).padLeft(2, '0')}${g.toRadixString(16).padLeft(2, '0')}${b.toRadixString(16).padLeft(2, '0')}';
-
-    _controller.runJavaScript(
-      "document.body.style.cssText = 'color: $themeColorHex !important; background-color: $bgColorHex !important;';",
+      "document.getElementById('velum-css').textContent = '${_jsString(css)}';"
+      "document.body.style.cssText = 'color: ${_hex(settings.theme.textColor)} !important; "
+      "background-color: ${_hex(settings.theme.backgroundColor)} !important;';",
     );
   }
 
@@ -1378,7 +1310,9 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     _isPageReady = false;
 
-    final dynamicCss = _buildDynamicCss(settings);
+    final fontCss = _buildFontCss(settings);
+    _lastFontCss = fontCss;
+    final dynamicCss = _buildDynamicCss(settings, hasCustomFont: fontCss.isNotEmpty);
 
     final combinedHtml =
         '''
@@ -1390,6 +1324,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Merriweather:wght@300;400;700&family=Inter:wght@300;400;600&family=Roboto+Mono&display=swap');
   </style>
+  <style id="velum-font">$fontCss</style>
   <style id="velum-css">
     $dynamicCss
   </style>
@@ -1400,9 +1335,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 </html>
 ''';
 
-    final contentBase64 = base64Encode(utf8.encode(combinedHtml));
-    _controller.loadRequest(
-      Uri.parse('data:text/html;charset=utf-8;base64,$contentBase64'),
-    );
+    // loadHtmlString has no URL length cap; data: URLs are refused by the
+    // WebView above 2 MB, which blanked chapters with embedded images.
+    _controller.loadHtmlString(combinedHtml);
   }
 }

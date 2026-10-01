@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,7 +18,8 @@ import 'features/reader/data/services/bookmark_service.dart';
 import 'features/library/data/models/scanned_book.dart';
 import 'features/library/data/services/library_service.dart';
 import 'features/library/presentation/providers/library_notifier.dart';
-import 'features/tts/data/services/tts_service.dart';
+import 'features/tts/data/services/device_tts_engine.dart';
+import 'features/tts/data/services/edge_tts_engine.dart';
 import 'features/tts/data/services/velum_audio_handler.dart';
 
 import 'core/providers/ad_notifier.dart';
@@ -27,8 +29,8 @@ late VelumAudioHandler audioHandler;
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Ads
-  await AdService().initialize();
+  // Start the ads SDK without blocking the first frame; ads load once it's ready.
+  unawaited(AdService().initialize());
 
   // Initialize SharedPreferences
   final prefs = await SharedPreferences.getInstance();
@@ -44,7 +46,6 @@ void main() async {
 
   final highlightService = HighlightService(prefs);
   final bookmarkService = BookmarkService(prefs);
-  final ttsService = TtsService();
 
   // Initialize audio_service for media notification controls
   audioHandler = await AudioService.init(
@@ -63,7 +64,6 @@ void main() async {
       libraryService: libraryService,
       highlightService: highlightService,
       bookmarkService: bookmarkService,
-      ttsService: ttsService,
     ),
   );
 }
@@ -73,7 +73,6 @@ class MainApp extends StatelessWidget {
   final LibraryService libraryService;
   final HighlightService highlightService;
   final BookmarkService bookmarkService;
-  final TtsService ttsService;
 
   const MainApp({
     super.key,
@@ -81,7 +80,6 @@ class MainApp extends StatelessWidget {
     required this.libraryService,
     required this.highlightService,
     required this.bookmarkService,
-    required this.ttsService,
   });
 
   @override
@@ -92,7 +90,8 @@ class MainApp extends StatelessWidget {
         Provider.value(value: libraryService),
         Provider.value(value: highlightService),
         Provider.value(value: bookmarkService),
-        Provider.value(value: ttsService),
+        Provider(create: (_) => DeviceTtsEngine()),
+        Provider(create: (_) => EdgeTtsEngine()),
         Provider.value(value: prefs),
         ChangeNotifierProvider(
           create: (context) =>

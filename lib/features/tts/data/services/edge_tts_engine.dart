@@ -3,31 +3,20 @@ import 'package:flutter/foundation.dart';
 import 'package:edge_tts/edge_tts.dart';
 import 'package:just_audio/just_audio.dart';
 import '../models/tts_settings.dart';
-
-/// Represents a text chunk for TTS with its position info
-class TtsChunk {
-  final int index;
-  final String text;
-  final int paragraphIndex;
-  final int? sentenceIndex; // null if highlight mode is paragraph
-
-  const TtsChunk({
-    required this.index,
-    required this.text,
-    required this.paragraphIndex,
-    this.sentenceIndex,
-  });
-}
+import 'tts_engine.dart';
 
 /// Audio source that plays MP3 bytes from memory
+// ignore: experimental_member_use
 class _BytesAudioSource extends StreamAudioSource {
   final Uint8List _bytes;
   _BytesAudioSource(this._bytes);
 
   @override
+  // ignore: experimental_member_use
   Future<StreamAudioResponse> request([int? start, int? end]) async {
     start ??= 0;
     end ??= _bytes.length;
+    // ignore: experimental_member_use
     return StreamAudioResponse(
       sourceLength: _bytes.length,
       contentLength: end - start,
@@ -54,6 +43,8 @@ class _AudioCache {
     return value;
   }
 
+  bool contains(String key) => _map.containsKey(key);
+
   void put(String key, Uint8List value) {
     _map.remove(key); // remove old position if exists
     _map[key] = value;
@@ -65,12 +56,13 @@ class _AudioCache {
   void clear() => _map.clear();
 }
 
-/// Service wrapper around Edge TTS + just_audio
-class TtsService {
+/// Experimental engine: Microsoft Edge neural voices (online) played via just_audio.
+class EdgeTtsEngine extends TtsEngine {
   final AudioPlayer _player = AudioPlayer();
 
-  List<Voice> _availableVoices = [];
-  TtsState _state = TtsState.idle;
+  List<TtsVoice> _voices = [];
+  bool _initialized = false;
+  bool _playing = false;
 
   // Synthesis parameters
   String _voice = 'en-US-EmmaMultilingualNeural';
@@ -85,130 +77,118 @@ class TtsService {
   /// LRU audio cache — avoids re-synthesis when navigating back & forth
   final _AudioCache _cache = _AudioCache(maxSize: 40);
 
-  /// In-flight prefetch futures keyed by cache key
+  /// In-flight synthesis futures keyed by cache key
   final Map<String, Future<Uint8List>> _pendingSynths = {};
 
   /// Batch synthesis tracking
   int _batchTotal = 0;
   int _batchDone = 0;
 
-  /// Generation counter — incremented on every speak() call so that
-  /// stale processingState events from a previous audio source are ignored.
+  /// Incremented on every speak()/stop() so stale async work is ignored.
   int _speakGeneration = 0;
 
-  // Callbacks
-  VoidCallback? onStart;
-  VoidCallback? onComplete;
-  VoidCallback? onPause;
-  VoidCallback? onContinue;
-  void Function(String text, int start, int end, String word)? onProgress;
-  void Function(String error)? onError;
-  /// Called whenever batch synthesis progress changes
-  void Function(int done, int total)? onSynthesisProgress;
+  @override
+  List<TtsVoice> get voices => _voices;
+  @override
+  int get prepareTotal => _batchTotal;
+  @override
+  int get preparedCount => _batchDone;
+  @override
+  bool get supportsResume => true;
 
-  TtsState get state => _state;
-  List<Voice> get availableVoices => _availableVoices;
-  int get batchTotal => _batchTotal;
-  int get batchDone => _batchDone;
-
-  /// Unique locales derived from available voices
-  List<String> get availableLanguages {
-    return _availableVoices.map((v) => v.locale).toSet().toList()..sort();
-  }
-
-  /// Initialize the TTS engine
+  @override
   Future<void> init() async {
-    // Fetch available voices from Edge TTS
-    try {
-      _availableVoices = await listVoices();
-    } catch (e) {
-      debugPrint('Failed to fetch Edge TTS voices: $e');
-      _availableVoices = [];
-    }
+    if (_initialized) return;
+    _initialized = true;
 
-    // Listen for playback completion — only fire onComplete if the generation
-    // matches, so stale events from a previous audio source are ignored.
+    // Only fire onComplete while playing, so stale events from a previous
+    // audio source (after stop/replace) are ignored.
     _player.processingStateStream.listen((processingState) {
-      if (processingState == ProcessingState.completed &&
-          _state == TtsState.playing) {
-        _state = TtsState.stopped;
+      if (processingState == ProcessingState.completed && _playing) {
+        _playing = false;
         onComplete?.call();
       }
     });
 
-    debugPrint(
-      'Edge TTS initialized with ${availableLanguages.length} languages '
-      'and ${_availableVoices.length} voices',
-    );
+    try {
+      _voices = (await listVoices())
+          .map(
+            (v) => TtsVoice(
+              id: v.shortName,
+              label: _voiceLabel(v.shortName, v.gender),
+              locale: TtsEngine.normaliseLocale(v.locale),
+            ),
+          )
+          .toList();
+    } catch (e) {
+      debugPrint('Failed to fetch Edge TTS voices: $e');
+      _initialized = false; // retry next time
+    }
   }
 
-  /// Apply TTS settings
+  /// 'en-US-EmmaMultilingualNeural' + 'Female' → 'Emma (Female)'
+  static String _voiceLabel(String shortName, String gender) {
+    final parts = shortName.split('-');
+    if (parts.length < 3) return shortName;
+    final name = parts
+        .sublist(2)
+        .join('-')
+        .replaceAll('MultilingualNeural', '')
+        .replaceAll('Neural', '')
+        .replaceAll('Multilingual', '');
+    if (name.isEmpty) return shortName;
+    if (gender.isEmpty) return name;
+    return '$name (${gender[0].toUpperCase()}${gender.substring(1).toLowerCase()})';
+  }
+
+  @override
   Future<void> applySettings(TtsSettings settings) async {
-    // Convert speechRate (0.0–1.0, default 0.5) → edge_tts percentage string
-    // 0.5 → '+0%', 1.0 → '+100%', 0.1 → '-80%'
+    // speechRate (0.0–1.0, default 0.5) → '+0%' at 0.5, '+100%' at 1.0, '-80%' at 0.1
     final ratePercent = ((settings.speechRate / 0.5) - 1) * 100;
     _rate = '${ratePercent >= 0 ? '+' : ''}${ratePercent.round()}%';
 
-    // Convert pitch (0.5–2.0, default 1.0) → edge_tts Hz string
-    // 1.0 → '+0Hz', 0.5 → '-50Hz', 2.0 → '+100Hz'
+    // pitch (0.5–2.0, default 1.0) → '+0Hz' at 1.0, '-50Hz' at 0.5, '+100Hz' at 2.0
     final pitchHz = (settings.pitch - 1.0) * 100;
     _pitch = '${pitchHz >= 0 ? '+' : ''}${pitchHz.round()}Hz';
 
-    // Volume handled by the audio player (0.0–1.0)
     _volume = settings.volume;
     await _player.setVolume(_volume);
 
-    // Set voice
-    if (settings.voiceName != null) {
-      _voice = settings.voiceName!;
+    final voice = settings.edgeVoice;
+    if (voice != null) {
+      _voice = voice;
     } else {
-      final langVoices = getVoicesForLanguage(settings.language);
-      if (langVoices.isNotEmpty) {
-        _voice = langVoices.first.shortName;
-      }
+      final langVoices = voicesFor(settings.language);
+      if (langVoices.isNotEmpty) _voice = langVoices.first.id;
     }
 
-    // If synthesis params changed, invalidate cache
     final newFingerprint = '$_voice|$_rate|$_pitch';
     if (newFingerprint != _settingsFingerprint) {
       _settingsFingerprint = newFingerprint;
-      _cache.clear();
-      _pendingSynths.clear();
+      clearCache();
     }
   }
 
-  /// Get voices filtered by language (exact locale match)
-  List<Voice> getVoicesForLanguage(String language) {
-    final normalizedLang = language.toLowerCase().replaceAll('_', '-');
-    return _availableVoices
-        .where(
-          (v) => v.locale.toLowerCase().replaceAll('_', '-') == normalizedLang,
-        )
-        .toList();
-  }
-
-  /// Build a cache key for a piece of text under current settings
   String _cacheKey(String text) => '$_settingsFingerprint|$text';
 
-  /// Synthesize text to MP3 bytes, using cache when available.
-  Future<Uint8List> _getAudio(String text) async {
+  /// Synthesize text to MP3 bytes, using cache or joining in-flight work.
+  Future<Uint8List> _getAudio(String text) {
     final key = _cacheKey(text);
-
-    // 1. Check LRU cache
     final cached = _cache.get(key);
-    if (cached != null) return cached;
+    if (cached != null) return Future.value(cached);
+    final pending = _pendingSynths[key];
+    if (pending != null) return pending;
 
-    // 2. Join an in-flight synthesis for the same key if one exists
-    if (_pendingSynths.containsKey(key)) {
-      return _pendingSynths[key]!;
-    }
-
-    // 3. Start new synthesis
-    final future = _synthesize(text).then((bytes) {
+    final future = Communicate(
+      text: text,
+      voice: _voice,
+      rate: _rate,
+      pitch: _pitch,
+    ).toBytes().then((bytes) {
       _cache.put(key, bytes);
       _pendingSynths.remove(key);
       return bytes;
-    }).catchError((e) {
+    }).catchError((Object e) {
       _pendingSynths.remove(key);
       throw e;
     });
@@ -217,68 +197,39 @@ class TtsService {
     return future;
   }
 
-  /// Raw synthesis via Edge TTS
-  Future<Uint8List> _synthesize(String text) async {
-    final communicate = Communicate(
-      text: text,
-      voice: _voice,
-      rate: _rate,
-      pitch: _pitch,
-    );
-    return communicate.toBytes();
-  }
-
-  /// Start prefetching audio for a text chunk in the background.
-  /// The result goes into the LRU cache for instant playback later.
+  @override
   void prefetch(String text) {
     if (text.isEmpty) return;
     final key = _cacheKey(text);
-    // Already cached or in-flight — nothing to do
-    if (_cache.get(key) != null || _pendingSynths.containsKey(key)) return;
-    // Fire and forget
+    if (_cache.contains(key) || _pendingSynths.containsKey(key)) return;
     _getAudio(text).ignore();
   }
 
-  /// Synthesize all chunk texts in the background, reporting progress.
-  /// Runs up to [concurrency] requests in parallel.
-  /// [startFrom] reorders synthesis to prioritise chunks from that index
-  /// onward (wrapping around to the beginning), so playback starting
-  /// mid-chapter doesn't wait for earlier chunks.
-  void synthesizeAll(List<String> texts, {int concurrency = 3, int startFrom = 0}) {
+  /// Synthesize all chunk texts in the background (3 at a time), starting at
+  /// [startFrom] and wrapping around, so playback mid-chapter never waits
+  /// on earlier chunks.
+  @override
+  void prepare(List<String> texts, {int startFrom = 0, int concurrency = 3}) {
     _batchTotal = texts.length;
-    // Count how many are already cached
-    _batchDone = texts.where((t) => _cache.get(_cacheKey(t)) != null).length;
-    onSynthesisProgress?.call(_batchDone, _batchTotal);
-
+    _batchDone = texts.where((t) => _cache.contains(_cacheKey(t))).length;
+    onPrepareProgress?.call();
     if (_batchDone >= _batchTotal) return;
 
-    // Reorder: startFrom → end, then 0 → startFrom
-    final ordered = <String>[
-      ...texts.sublist(startFrom.clamp(0, texts.length)),
-      if (startFrom > 0) ...texts.sublist(0, startFrom.clamp(0, texts.length)),
-    ];
+    final start = startFrom.clamp(0, texts.length);
+    final pending = [...texts.sublist(start), ...texts.sublist(0, start)]
+        .where((t) => !_cache.contains(_cacheKey(t)))
+        .toList();
 
-    // Collect texts that still need synthesis (in priority order)
-    final pending = ordered.where((t) => _cache.get(_cacheKey(t)) == null).toList();
-
-    // Process with limited concurrency
     var running = 0;
     var nextIndex = 0;
-
     void startNext() {
       while (running < concurrency && nextIndex < pending.length) {
-        final text = pending[nextIndex++];
         running++;
-        _getAudio(text).then((_) {
+        // Failures count as done so the progress indicator still completes.
+        _getAudio(pending[nextIndex++]).then((_) {}, onError: (_) {}).whenComplete(() {
           _batchDone++;
           running--;
-          onSynthesisProgress?.call(_batchDone, _batchTotal);
-          startNext();
-        }).catchError((_) {
-          // Count failures as done so the progress bar still completes
-          _batchDone++;
-          running--;
-          onSynthesisProgress?.call(_batchDone, _batchTotal);
+          onPrepareProgress?.call();
           startNext();
         });
       }
@@ -287,129 +238,62 @@ class TtsService {
     startNext();
   }
 
-  /// Speak text
+  @override
   Future<void> speak(String text) async {
     if (text.isEmpty) return;
-
-    // Increment generation so any pending completion from the previous
-    // audio source is ignored by the processingStateStream listener.
     final gen = ++_speakGeneration;
 
-    // Stop current playback first to prevent the player from firing
-    // a 'completed' event when we replace the audio source.
+    // Stop first so replacing the source doesn't fire a 'completed' event.
+    _playing = false;
     await _player.stop();
-
-    _state = TtsState.playing;
 
     try {
       final audioBytes = await _getAudio(text);
-
-      // If another speak() was called while we were synthesizing, bail out.
       if (gen != _speakGeneration) return;
 
       if (audioBytes.isEmpty) {
-        _state = TtsState.stopped;
         onComplete?.call();
         return;
       }
 
       await _player.setAudioSource(_BytesAudioSource(audioBytes));
-      await _player.setVolume(_volume);
-      await _player.play();
-
-      // Signal onStart only after audio is actually playing, so that
-      // highlight sync in the UI matches the audible output.
-      if (gen == _speakGeneration) {
-        onStart?.call();
-      }
+      if (gen != _speakGeneration) return;
+      _playing = true;
+      // play()'s future only completes when playback ends, so don't await it —
+      // the bytes are in memory and audio starts right away.
+      _player.play().ignore();
+      onStart?.call();
     } catch (e) {
       if (gen != _speakGeneration) return;
-      _state = TtsState.stopped;
+      _playing = false;
       onError?.call(e.toString());
     }
   }
 
-  /// Stop speaking
+  @override
   Future<void> stop() async {
-    _speakGeneration++; // Invalidate any in-flight speak()
-    _state = TtsState.stopped;
+    _speakGeneration++;
+    _playing = false;
     await _player.stop();
   }
 
-  /// Pause speaking (proper pause with just_audio)
+  @override
   Future<void> pause() async {
-    _state = TtsState.paused;
+    _playing = false;
     await _player.pause();
-    onPause?.call();
   }
 
-  /// Resume speaking from paused position
+  @override
   Future<void> resume() async {
-    _state = TtsState.playing;
-    await _player.play();
-    onContinue?.call();
+    _playing = true;
+    _player.play().ignore();
   }
 
-  /// Clear the audio cache (e.g. on chapter change)
+  @override
   void clearCache() {
     _cache.clear();
     _pendingSynths.clear();
-  }
-
-  /// Dispose resources
-  Future<void> dispose() async {
-    await _player.stop();
-    await _player.dispose();
-    _cache.clear();
-    _pendingSynths.clear();
-  }
-
-  /// Split text into chunks based on highlight mode
-  static List<TtsChunk> chunkText(String text, TtsHighlightMode mode) {
-    final chunks = <TtsChunk>[];
-
-    // Split into paragraphs first
-    final paragraphs = text.split(RegExp(r'\n\s*\n'));
-
-    int chunkIndex = 0;
-    int filteredParagraphIndex = 0;
-
-    for (int pIndex = 0; pIndex < paragraphs.length; pIndex++) {
-      final para = paragraphs[pIndex].trim();
-      if (para.isEmpty) continue;
-
-      if (mode == TtsHighlightMode.paragraph) {
-        chunks.add(
-          TtsChunk(
-            index: chunkIndex++,
-            text: para,
-            paragraphIndex: filteredParagraphIndex,
-          ),
-        );
-      } else {
-        final sentences = _splitIntoSentences(para);
-        for (int sIndex = 0; sIndex < sentences.length; sIndex++) {
-          final sentence = sentences[sIndex].trim();
-          if (sentence.isEmpty) continue;
-          chunks.add(
-            TtsChunk(
-              index: chunkIndex++,
-              text: sentence,
-              paragraphIndex: filteredParagraphIndex,
-              sentenceIndex: sIndex,
-            ),
-          );
-        }
-      }
-      filteredParagraphIndex++;
-    }
-
-    return chunks;
-  }
-
-  /// Helper to split paragraph into sentences
-  static List<String> _splitIntoSentences(String text) {
-    final regex = RegExp(r'(?<=[.!?])\s+');
-    return text.split(regex);
+    _batchTotal = 0;
+    _batchDone = 0;
   }
 }

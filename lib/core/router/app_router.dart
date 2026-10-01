@@ -12,7 +12,8 @@ import '../../features/reader/data/services/epub_service.dart';
 import '../../features/library/data/services/library_service.dart';
 import '../../features/reader/data/services/highlight_service.dart';
 import '../../features/reader/data/services/bookmark_service.dart';
-import '../../features/tts/data/services/tts_service.dart';
+import '../../features/tts/data/services/device_tts_engine.dart';
+import '../../features/tts/data/services/edge_tts_engine.dart';
 import '../../features/tts/data/services/velum_audio_handler.dart';
 import '../../features/reader/presentation/providers/reader_notifier.dart';
 import '../../features/reader/presentation/providers/highlight_notifier.dart';
@@ -71,7 +72,8 @@ GoRouter createAppRouter(LibraryNotifier libraryNotifier) {
               ChangeNotifierProvider(
                 create: (context) {
                   final ttsNotifier = TtsNotifier(
-                    context.read<TtsService>(),
+                    context.read<DeviceTtsEngine>(),
+                    context.read<EdgeTtsEngine>(),
                     context.read<SharedPreferences>(),
                   )..init();
                   final audioHandler = context.read<VelumAudioHandler>();

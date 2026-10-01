@@ -64,9 +64,9 @@ class TtsFab extends StatelessWidget {
                 await ttsNotifier.play();
               } else {
                 // First time — load content then play
-                final text = readerNotifier.extractStructuredText();
-                if (text.isNotEmpty) {
-                  ttsNotifier.loadContent(text);
+                final paragraphs = readerNotifier.ttsParagraphs;
+                if (paragraphs.isNotEmpty) {
+                  ttsNotifier.loadContent(paragraphs);
                   await ttsNotifier.play();
                 }
               }

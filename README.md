@@ -14,7 +14,7 @@
 
 - 📚 **Library** — auto-scan your device for EPUBs or import manually, with search, sort, pinning, and per-book reading progress
 - 📖 **Reader** — WebView-based rendering with full HTML/CSS support, swipe chapter navigation, and deep typography controls
-- 🔊 **Text-to-Speech** — Microsoft Edge neural voices with synced sentence/paragraph highlighting and lock-screen controls
+- 🔊 **Text-to-Speech** — your phone's own speech engine (Edge neural voices optional) with synced sentence/paragraph highlighting and lock-screen controls
 - 🖍️ **Highlights & Bookmarks** — five highlight colours plus positional bookmarks, browsable from a single panel
 - 🔍 **Global Search** — search every chapter at once with snippet previews
 - 🎨 **Theming** — Light, Dark, and Sepia, applied independently to the app UI and the reading view
@@ -23,20 +23,22 @@
 
 ## Text-to-Speech Engine
 
-Velum's TTS is powered by **Microsoft Edge TTS** (via the [`edge_tts`](https://pub.dev/packages/edge_tts) package) — the same neural voices used by Microsoft Edge's *Read Aloud*. Synthesis happens in the cloud (an internet connection is required), which gives Velum access to **hundreds of natural-sounding neural voices across 50+ languages** without any on-device voice data.
+Velum reads aloud with the **speech engine installed on your phone** (via [`flutter_tts`](https://pub.dev/packages/flutter_tts)) — e.g. Speech Services by Google or Samsung TTS. It works offline and starts speaking almost instantly. On Android you can pick any installed engine and any of its downloaded voices.
 
-### How the audio pipeline works
+**Microsoft Edge neural voices** (via [`edge_tts`](https://pub.dev/packages/edge_tts)) are still available as an **experimental** option in the TTS settings. They sound more natural but need an internet connection and take longer to start.
 
-1. **Chunking** — chapter text is split into sentences or paragraphs (matching the chosen highlight mode) by `TtsService.chunkText`.
-2. **Synthesis** — each chunk is synthesized to MP3 bytes by Edge TTS. When playback starts, the whole chapter is batch-synthesized in the background (3 concurrent requests), prioritised from the current reading position so mid-chapter playback never waits on earlier chunks.
-3. **Caching** — synthesized audio lands in an in-memory LRU cache (40 entries). Cache keys include a voice/rate/pitch fingerprint, so changing any setting automatically invalidates stale audio. The next 3 chunks are always prefetched for gapless playback.
-4. **Playback** — MP3 bytes play through [`just_audio`](https://pub.dev/packages/just_audio) from an in-memory audio source. A generation counter guards against race conditions when chunks change rapidly.
-5. **System integration** — [`audio_service`](https://pub.dev/packages/audio_service) (`VelumAudioHandler`) exposes background playback with lock-screen / notification controls (play, pause, skip paragraph), and [`audio_session`](https://pub.dev/packages/audio_session) handles audio-focus interruptions from other apps.
+### How playback works
+
+1. **One source of truth** — when a chapter is rendered, each paragraph is split into sentence spans and the same pass records the spoken text for each span, so the voice and the highlight always point at the same sentence.
+2. **Chunking** — chapter text is spoken sentence by sentence or paragraph by paragraph (matching the highlight mode).
+3. **Device engine** — each chunk is handed straight to the phone's engine; pausing stops the current sentence and resuming restarts it.
+4. **Edge engine (experimental)** — chunks are synthesized to MP3 in the background (3 at a time, starting from the reading position), kept in a 40-entry LRU cache, and played with [`just_audio`](https://pub.dev/packages/just_audio).
+5. **System integration** — [`audio_service`](https://pub.dev/packages/audio_service) (`VelumAudioHandler`) provides lock-screen / notification controls, and [`audio_session`](https://pub.dev/packages/audio_session) handles interruptions from other apps.
 
 ### TTS features
 
 - Play/Pause floating button in the reader with a synthesis progress indicator
-- 50+ languages, multiple voices per language, with one-tap voice preview
+- Choose the speech engine and voice, with one-tap voice preview
 - Adjustable speed (0.2×–2.0×), pitch, and volume
 - **Sentence-level or paragraph-level highlighting** that auto-scrolls to follow along
 - Double-tap any paragraph or sentence to jump playback to that point
@@ -116,7 +118,7 @@ Velum's TTS is powered by **Microsoft Edge TTS** (via the [`edge_tts`](https://p
 | Navigation | `go_router` with an onboarding redirect guard |
 | EPUB parsing | `epubx`, run in background isolates |
 | Content rendering | `webview_flutter` + injected `assets/js/reader.js` (gestures, highlights, TTS sync) |
-| Text-to-Speech | `edge_tts` (Microsoft Edge neural voices) |
+| Text-to-Speech | `flutter_tts` (device engines); `edge_tts` (experimental) |
 | Audio playback | `just_audio` + `audio_service` + `audio_session` |
 | Library storage | `hive` (with automatic migration from SharedPreferences) |
 | Settings / highlights / bookmarks | `shared_preferences` |

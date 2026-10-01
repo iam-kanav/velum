@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
@@ -77,7 +78,16 @@ class SettingsNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
+  Timer? _saveDebounce;
+
+  /// Sliders fire on every drag tick; persist once they settle.
+  void _saveSoon() {
+    _saveDebounce?.cancel();
+    _saveDebounce = Timer(const Duration(milliseconds: 300), _saveSettings);
+  }
+
   Future<void> _saveSettings() async {
+    _saveDebounce?.cancel();
     // Batch all writes in parallel instead of sequential awaits
     final futures = <Future>[
       _prefs.setInt(_appThemeKey, _settings.appTheme.index),
@@ -113,11 +123,6 @@ class SettingsNotifier extends ChangeNotifier {
     _settings = _settings.copyWith(readerTheme: theme);
     _saveSettings();
     notifyListeners();
-  }
-
-  // Legacy method for backward compatibility
-  void updateTheme(ReaderTheme theme) {
-    updateReaderTheme(theme);
   }
 
   void updateFont(ReaderFont font) {
@@ -229,21 +234,21 @@ class SettingsNotifier extends ChangeNotifier {
     // Clamp size for sanity
     size = size.clamp(12.0, 32.0);
     _settings = _settings.copyWith(fontSize: size);
-    _saveSettings();
+    _saveSoon();
     notifyListeners();
   }
 
   void updateLineHeight(double height) {
     height = height.clamp(1.0, 2.5);
     _settings = _settings.copyWith(lineHeight: height);
-    _saveSettings();
+    _saveSoon();
     notifyListeners();
   }
 
   void updateParagraphSpacing(double spacing) {
     spacing = spacing.clamp(0.0, 3.0);
     _settings = _settings.copyWith(paragraphSpacing: spacing);
-    _saveSettings();
+    _saveSoon();
     notifyListeners();
   }
 
@@ -256,7 +261,7 @@ class SettingsNotifier extends ChangeNotifier {
   void updateHorizontalMargin(double margin) {
     margin = margin.clamp(0.0, 40.0);
     _settings = _settings.copyWith(horizontalMargin: margin);
-    _saveSettings();
+    _saveSoon();
     notifyListeners();
   }
 }

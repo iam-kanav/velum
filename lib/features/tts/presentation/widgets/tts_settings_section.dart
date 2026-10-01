@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../data/models/tts_settings.dart';
+import '../../data/services/device_tts_engine.dart';
 import '../providers/tts_notifier.dart';
 
 const Color _accentGreen = Color(0xFF4CAF50);
@@ -259,6 +260,29 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Speech engine (device engines, Android)
+          if (!settings.useEdgeTts && ttsNotifier.deviceEngines.isNotEmpty) ...[
+            _buildDropdownRow(
+              label: 'Engine',
+              value: ttsNotifier.currentDeviceEngine ?? '',
+              items: ttsNotifier.deviceEngines
+                  .map(
+                    (engine) => DropdownMenuItem<String>(
+                      value: engine,
+                      child: Text(
+                        DeviceTtsEngine.engineLabel(engine),
+                        style: TextStyle(color: widget.textColor, fontSize: 13),
+                      ),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (val) {
+                if (val != null) ttsNotifier.updateDeviceEngine(val);
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+
           // Language Dropdown
           _buildDropdownRow(
             label: 'Language',
@@ -343,6 +367,11 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           // Audio Focus Toggle
           _buildAudioFocusToggle(ttsNotifier),
 
+          const SizedBox(height: 24),
+
+          // Experimental: Edge online voices
+          _buildExperimentalSection(ttsNotifier),
+
           const SizedBox(height: 8),
         ],
       ),
@@ -385,42 +414,11 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     );
   }
 
-  /// Extract a friendly display name from an Edge TTS voice short name.
-  /// e.g. 'en-US-EmmaMultilingualNeural' → 'Emma'
-  String _voiceDisplayName(Map<String, dynamic> voice) {
-    final shortName = voice['name'] as String? ?? '';
-    final gender = voice['gender'] as String? ?? '';
-    // shortName format: locale-NameNeural (e.g. en-US-EmmaMultilingualNeural)
-    final parts = shortName.split('-');
-    if (parts.length >= 3) {
-      var name = parts.sublist(2).join('-');
-      // Strip common suffixes
-      name = name
-          .replaceAll('MultilingualNeural', '')
-          .replaceAll('Neural', '')
-          .replaceAll('Multilingual', '');
-      if (name.isNotEmpty && gender.isNotEmpty) {
-        return '$name (${gender[0].toUpperCase()}${gender.substring(1).toLowerCase()})';
-      }
-      if (name.isNotEmpty) return name;
-    }
-    return shortName;
-  }
-
   bool _isPreviewing = false;
 
   Widget _buildVoiceDropdown(TtsNotifier ttsNotifier) {
-    final allVoices = ttsNotifier.getVoicesForCurrentLanguage();
+    final voices = ttsNotifier.voicesForCurrentLanguage;
     final settings = ttsNotifier.settings;
-
-    // Deduplicate voices by name
-    final seenNames = <String>{};
-    final voices = allVoices.where((v) {
-      final name = v['name'] as String?;
-      if (name == null || seenNames.contains(name)) return false;
-      seenNames.add(name);
-      return true;
-    }).toList();
 
     if (voices.isEmpty) {
       return Row(
@@ -445,9 +443,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     }
 
     // Check if saved voice exists in current list
-    final voiceNames = voices.map((v) => v['name'] as String).toList();
-    final currentVoice =
-        settings.voiceName != null && voiceNames.contains(settings.voiceName)
+    final currentVoice = voices.any((v) => v.id == settings.voiceName)
         ? settings.voiceName
         : null;
 
@@ -486,9 +482,9 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                     items: voices
                         .map(
                           (voice) => DropdownMenuItem<String>(
-                            value: voice['name'] as String,
+                            value: voice.id,
                             child: Text(
-                              _voiceDisplayName(voice),
+                              voice.label,
                               style: TextStyle(color: widget.textColor, fontSize: 13),
                             ),
                           ),
@@ -717,6 +713,57 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           onChanged: (value) => ttsNotifier.updateStopOnAudioFocusLoss(value),
           activeThumbColor: _accentGreen,
           activeTrackColor: _accentGreen.withAlpha(80),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildExperimentalSection(TtsNotifier ttsNotifier) {
+    final enabled = ttsNotifier.settings.useEdgeTts;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'EXPERIMENTAL',
+          style: TextStyle(
+            color: widget.textColor.withAlpha(120),
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Microsoft Edge Voices',
+                    style: TextStyle(
+                      color: widget.textColor.withAlpha(200),
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    'Natural online voices. Needs internet and is slower to start.',
+                    style: TextStyle(
+                      color: widget.textColor.withAlpha(120),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Switch(
+              value: enabled,
+              onChanged: (value) => ttsNotifier.setUseEdgeTts(value),
+              activeThumbColor: _accentGreen,
+              activeTrackColor: _accentGreen.withAlpha(80),
+            ),
+          ],
         ),
       ],
     );

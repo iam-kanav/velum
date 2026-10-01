@@ -6,6 +6,7 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 
 import '../../data/services/epub_service.dart';
+import '../../../tts/data/models/tts_chunk.dart';
 import '../../../library/data/services/library_service.dart';
 
 /// Determine MIME type from filename (used in isolate).
@@ -122,24 +123,26 @@ class ReaderNotifier extends ChangeNotifier {
   String? _errorMessage;
   String? get errorMessage => _errorMessage;
 
-  // Image cache: filename -> base64 data URL
-  Map<String, String> _imageDataUrls = {};
-  Map<String, String> get imageDataUrls => _imageDataUrls;
-
-  // Normalized key lookup map for O(1) image matching
-  Map<String, String> _normalizedImageLookup = {};
+  // Image lookup: path variants -> EPUB image file name. Data URLs are
+  // encoded lazily per chapter instead of for every image when a book opens.
+  Map<String, String> _imageAliases = {};
+  Map<String, String> _normalizedImageAliases = {};
+  final Map<String, String> _imageDataUrls = {};
 
   // Performance: cache processed HTML to avoid expensive re-parsing on every widget rebuild
   String? _cachedChapterHtml;
   String? _cachedProcessedHtml;
+  List<TtsParagraph> _cachedParagraphs = const [];
 
   Future<void> loadBook(String assetPath) async {
     _isLoading = true;
     _errorMessage = null;
-    _imageDataUrls = {};
-    _normalizedImageLookup = {};
+    _imageAliases = {};
+    _normalizedImageAliases = {};
+    _imageDataUrls.clear();
     _cachedChapterHtml = null;
     _cachedProcessedHtml = null;
+    _cachedParagraphs = const [];
     _currentBookPath = assetPath;
     notifyListeners();
 
@@ -200,108 +203,59 @@ class ReaderNotifier extends ChangeNotifier {
   }
 
   void _extractImages() {
-    if (_currentBook?.Content?.Images == null) return;
-
-    final images = _currentBook!.Content!.Images!;
-    debugPrint('Extracting ${images.length} images from EPUB');
+    final images = _currentBook?.Content?.Images;
+    if (images == null) return;
 
     for (final entry in images.entries) {
+      if (entry.value.Content == null) continue;
       final fileName = entry.key;
-      final imageContent = entry.value;
-
-      if (imageContent.Content != null) {
-        final mimeType = _getMimeTypeFromName(fileName);
-        final base64Data = base64Encode(imageContent.Content!);
-        final dataUrl = 'data:$mimeType;base64,$base64Data';
-
-        _imageDataUrls[fileName] = dataUrl;
-
-        final justFileName = fileName.split('/').last;
-        _imageDataUrls[justFileName] = dataUrl;
-
-        if (fileName.contains('/')) {
-          final pathParts = fileName.split('/');
-          if (pathParts.length >= 2) {
-            _imageDataUrls['${pathParts[pathParts.length - 2]}/${pathParts.last}'] =
-                dataUrl;
-          }
-        }
+      final parts = fileName.split('/');
+      _imageAliases[fileName] = fileName;
+      _imageAliases[parts.last] = fileName;
+      if (parts.length >= 2) {
+        _imageAliases['${parts[parts.length - 2]}/${parts.last}'] = fileName;
       }
     }
 
-    // Build normalized lookup map for O(1) matching
-    _normalizedImageLookup = _buildNormalizedLookup(_imageDataUrls);
-    debugPrint('Cached ${_imageDataUrls.length} image data URLs');
+    // Secondary keys (no leading ../, lower-case file name) for fuzzy matching
+    for (final entry in _imageAliases.entries) {
+      _normalizedImageAliases[_stripParentDirs(entry.key)] = entry.value;
+      _normalizedImageAliases[entry.key.split('/').last.toLowerCase()] =
+          entry.value;
+    }
+  }
+
+  static String _stripParentDirs(String path) {
+    var clean = path;
+    while (clean.startsWith('../')) {
+      clean = clean.substring(3);
+    }
+    return clean;
   }
 
   /// Process HTML content to replace image sources with base64 data URLs
   String processHtmlWithImages(String? htmlContent) {
     if (htmlContent == null) return '';
-    if (_imageDataUrls.isEmpty) return htmlContent;
+    if (_imageAliases.isEmpty) return htmlContent;
 
-    var processed = htmlContent;
-
-    // Replace image sources with data URLs
-    processed = processed.replaceAllMapped(_srcRegex, (match) {
-      final originalSrc = match.group(1) ?? '';
-
-      // Try to find matching image in our cache
-      String? dataUrl = _findImageDataUrl(originalSrc);
-
-      if (dataUrl != null) {
-        return 'src="$dataUrl"';
-      }
-
-      // If not found, return original
-      return match.group(0) ?? '';
+    return htmlContent.replaceAllMapped(_srcRegex, (match) {
+      final dataUrl = _findImageDataUrl(match.group(1) ?? '');
+      return dataUrl != null ? 'src="$dataUrl"' : match.group(0)!;
     });
-
-    return processed;
-  }
-
-  /// Build a secondary lookup map keyed by normalized filenames for O(1) matching.
-  static Map<String, String> _buildNormalizedLookup(Map<String, String> imageDataUrls) {
-    final lookup = <String, String>{};
-    for (final entry in imageDataUrls.entries) {
-      final key = entry.key;
-      final dataUrl = entry.value;
-      // Store with cleaned-up keys (no leading ../)
-      var clean = key;
-      while (clean.startsWith('../')) {
-        clean = clean.substring(3);
-      }
-      lookup[clean] = dataUrl;
-      // Store just the filename
-      lookup[key.split('/').last.toLowerCase()] = dataUrl;
-    }
-    return lookup;
   }
 
   String? _findImageDataUrl(String src) {
-    // Direct match
-    if (_imageDataUrls.containsKey(src)) {
-      return _imageDataUrls[src];
-    }
+    final cleanSrc = _stripParentDirs(src);
+    final fileName = _imageAliases[src] ??
+        _imageAliases[cleanSrc] ??
+        _normalizedImageAliases[cleanSrc] ??
+        _normalizedImageAliases[src.split('/').last.toLowerCase()];
+    if (fileName == null) return null;
 
-    // Try without leading ../
-    var cleanSrc = src;
-    while (cleanSrc.startsWith('../')) {
-      cleanSrc = cleanSrc.substring(3);
-    }
-    if (_imageDataUrls.containsKey(cleanSrc)) {
-      return _imageDataUrls[cleanSrc];
-    }
-    if (_normalizedImageLookup.containsKey(cleanSrc)) {
-      return _normalizedImageLookup[cleanSrc];
-    }
-
-    // Try just the filename (case-insensitive via normalized lookup)
-    final justFileName = src.split('/').last.toLowerCase();
-    if (_normalizedImageLookup.containsKey(justFileName)) {
-      return _normalizedImageLookup[justFileName];
-    }
-
-    return null;
+    return _imageDataUrls.putIfAbsent(fileName, () {
+      final bytes = _currentBook!.Content!.Images![fileName]!.Content!;
+      return 'data:${_getMimeTypeFromName(fileName)};base64,${base64Encode(bytes)}';
+    });
   }
 
   bool _showUI = true;
@@ -324,18 +278,6 @@ class ReaderNotifier extends ChangeNotifier {
         notifyListeners();
       });
     }
-  }
-
-  void showUITemporarily() {
-    _showUI = true;
-    notifyListeners();
-
-    // Cancel any existing timer and start a new one
-    _autoHideTimer?.cancel();
-    _autoHideTimer = Timer(_autoHideDuration, () {
-      _showUI = false;
-      notifyListeners();
-    });
   }
 
   /// Search all chapters for a query string, returning results with snippets.
@@ -386,111 +328,46 @@ class ReaderNotifier extends ChangeNotifier {
     }
   }
 
-  /// Extract plain text from the current chapter's HTML content
-  String extractPlainText() {
-    if (_currentChapter?.HtmlContent == null) return '';
+  static const _blockSelector = 'p, div, h1, h2, h3, h4, h5, h6, li, blockquote';
 
-    // Process HTML with images first (to ensure we have the full content)
-    final htmlContent = processHtmlWithImages(_currentChapter!.HtmlContent);
-
-    // Parse HTML and extract text
-    final document = html_parser.parse(htmlContent);
-    final body = document.body;
-    if (body == null) return '';
-
-    // Get text content, normalize whitespace
-    String text = body.text;
-
-    // Normalize multiple newlines to paragraph breaks
-    text = text.replaceAll(RegExp(r'\n\s*\n+'), '\n\n');
-    // Normalize multiple spaces
-    text = text.replaceAll(RegExp(r' +'), ' ');
-    // Trim each line
-    text = text.split('\n').map((line) => line.trim()).join('\n');
-    // Remove leading/trailing whitespace
-    text = text.trim();
-
-    return text;
-  }
-
-  /// Filter block elements to remove any that are ancestors of other elements
-  /// in the list. Prevents wrapper divs from being counted as separate
-  /// paragraphs (which would cause TTS to speak and highlight them as one
-  /// giant chunk covering the entire chapter).
-  static List<dom.Element> _filterToLeafBlocks(List<dom.Element> elements) {
-    if (elements.length <= 1) return elements;
-    return elements.where((el) {
-      // Exclude this element if any other matched element is its descendant
-      return !elements.any((other) {
-        if (identical(other, el)) return false;
-        dom.Node? node = other.parent;
-        while (node != null) {
-          if (identical(node, el)) return true;
-          node = node.parent;
-        }
-        return false;
-      });
-    }).toList();
-  }
-
-  /// Extract structured plain text from HTML, matching JS ttsGetParagraphs() order
-  /// Only extracts from <p> tags to ensure alignment with JS highlighting
-  String extractStructuredText() {
-    if (_currentChapter?.HtmlContent == null) return '';
-
-    // Process HTML with images first
-    final htmlContent = processHtmlWithImages(_currentChapter!.HtmlContent);
-
-    final document = html_parser.parse(htmlContent);
-    final body = document.body;
-    if (body == null) return '';
-
-    // Extract from block elements to avoid missing text
-    final paragraphs = <String>[];
-    final allElements = body.querySelectorAll(
-      'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
-    );
-    // Filter out ancestor elements so wrapper divs don't duplicate child text
-    final pElements = _filterToLeafBlocks(allElements.toList());
-
-    for (final p in pElements) {
-      final text = p.text.trim();
-      if (text.isNotEmpty) {
-        paragraphs.add(text);
+  /// Keep only block elements that contain no other matched block, so wrapper
+  /// divs aren't counted as separate paragraphs (which would make TTS speak and
+  /// highlight them as one giant chunk). Linear in elements × depth.
+  static List<dom.Element> _leafBlocks(dom.Element body) {
+    final elements = body.querySelectorAll(_blockSelector);
+    final matched = elements.toSet();
+    final hasBlockChild = <dom.Element>{};
+    for (final el in elements) {
+      for (var node = el.parent; node != null; node = node.parent) {
+        if (matched.contains(node) && !hasBlockChild.add(node)) break;
       }
     }
-
-    // Join paragraphs with double newlines for TTS chunking
-    return paragraphs.join('\n\n');
+    return elements.where((el) => !hasBlockChild.contains(el)).toList();
   }
 
-  /// Process HTML to wrap sentences in spans for sentence-level highlighting.
-  /// Preserves inner HTML tags (<i>, <b>, <a>, etc.) by splitting on the
-  /// innerHTML string rather than plain text.
-  String processHtmlForSentenceHighlight(String htmlContent) {
-    final document = html_parser.parse(htmlContent);
-    final body = document.body;
-    if (body == null) return htmlContent;
+  /// Paragraphs and sentences of the current chapter, indexed exactly like
+  /// the rendered page's data-para / data-sent attributes.
+  List<TtsParagraph> get ttsParagraphs {
+    getProcessedHtml();
+    return _cachedParagraphs;
+  }
 
-    final allElements = body.querySelectorAll(
-      'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
-    );
-    // Filter out ancestor elements so wrapper divs don't get separate indices
-    final pElements = _filterToLeafBlocks(allElements.toList());
-    int paraIndex = 0;
+  /// Wrap sentences in spans for sentence-level highlighting and collect the
+  /// matching TTS paragraphs in the same pass, so spoken sentences always line
+  /// up with the highlighted ones. Preserves inner tags (<i>, <b>, <a>, …).
+  (String, List<TtsParagraph>) _processForTts(String htmlContent) {
+    final body = html_parser.parse(htmlContent).body;
+    if (body == null) return (htmlContent, const []);
 
-    for (final p in pElements) {
+    final paragraphs = <TtsParagraph>[];
+    for (final p in _leafBlocks(body)) {
       final text = p.text.trim();
       if (text.isEmpty) continue;
+      final paraIndex = paragraphs.length;
 
-      // Split innerHTML into sentences, preserving inner tags
       final sentences = _splitHtmlIntoSentences(p.innerHtml);
-      if (sentences.length <= 1) {
-        // Single sentence - just add paragraph attributes
-        p.attributes['data-para'] = paraIndex.toString();
-        p.classes.add('tts-para');
-      } else {
-        // Multiple sentences - wrap each in a span
+      final spoken = <TtsSentence>[];
+      if (sentences.length > 1) {
         final newInnerHtml = StringBuffer();
         for (int sIdx = 0; sIdx < sentences.length; sIdx++) {
           final sentence = sentences[sIdx];
@@ -498,17 +375,26 @@ class ReaderNotifier extends ChangeNotifier {
           newInnerHtml.write(
             '<span class="tts-sent" data-para="$paraIndex" data-sent="$sIdx">$sentence</span>',
           );
-          // Add space between sentences for correct rendering
           if (sIdx < sentences.length - 1) newInnerHtml.write(' ');
         }
         p.innerHtml = newInnerHtml.toString();
-        p.attributes['data-para'] = paraIndex.toString();
-        p.classes.add('tts-para');
+        // Read the sentences back from the parsed spans: that's exactly the
+        // text the page shows for each data-sent index.
+        final seen = <int>{};
+        for (final span in p.querySelectorAll('span.tts-sent')) {
+          final idx = int.tryParse(span.attributes['data-sent'] ?? '');
+          final spanText = span.text.trim();
+          if (idx != null && spanText.isNotEmpty && seen.add(idx)) {
+            spoken.add((index: idx, text: spanText));
+          }
+        }
       }
-      paraIndex++;
+      p.attributes['data-para'] = paraIndex.toString();
+      p.classes.add('tts-para');
+      paragraphs.add(TtsParagraph(text, spoken));
     }
 
-    return body.innerHtml;
+    return (body.innerHtml, paragraphs);
   }
 
   /// Split an HTML string into sentences, preserving inner tags (<i>, <b>, <a>, etc.).
@@ -581,39 +467,9 @@ class ReaderNotifier extends ChangeNotifier {
       return _cachedProcessedHtml!;
     }
     _cachedChapterHtml = rawHtml;
-    final htmlWithImages = processHtmlWithImages(rawHtml);
-    _cachedProcessedHtml = processHtmlForSentenceHighlight(htmlWithImages);
-    return _cachedProcessedHtml!;
-  }
-
-  /// Process HTML to wrap paragraphs with IDs for TTS highlighting
-  /// Only indexes <p> elements to match extractStructuredText() and chunkText()
-  String processHtmlForTts(String? htmlContent) {
-    if (htmlContent == null || htmlContent.isEmpty) return htmlContent ?? '';
-
-    final document = html_parser.parse(htmlContent);
-    final body = document.body;
-    if (body == null) return htmlContent;
-
-    // Index block elements consistently with extractStructuredText()
-    final allElements = body.querySelectorAll(
-      'p, div, h1, h2, h3, h4, h5, h6, li, blockquote',
-    );
-    // Filter out ancestor elements so wrapper divs don't get separate indices
-    final pElements = _filterToLeafBlocks(allElements.toList());
-    int paragraphIndex = 0;
-
-    for (final p in pElements) {
-      final text = p.text.trim();
-      if (text.isEmpty) continue;
-
-      p.attributes['id'] = 'tts-para-$paragraphIndex';
-      p.attributes['data-para'] = paragraphIndex.toString();
-      p.classes.add('tts-paragraph');
-      paragraphIndex++;
-    }
-
-    // Return only the body's inner HTML to preserve original structure
-    return body.innerHtml;
+    final (html, paragraphs) = _processForTts(processHtmlWithImages(rawHtml));
+    _cachedProcessedHtml = html;
+    _cachedParagraphs = paragraphs;
+    return html;
   }
 }
