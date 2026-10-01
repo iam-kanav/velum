@@ -30,6 +30,13 @@ class CollectionsDrawer extends StatelessWidget {
     final current = library.currentCollection;
     final text = theme.textColor;
     final muted = text.withAlpha(150);
+    // The brand violet is too dark to read on the dark theme: use a light
+    // lavender there, on a softer tint.
+    final dark = theme == ReaderTheme.dark;
+    final selectedFg = dark ? const Color(0xFFC9BCFF) : _accent;
+    final selectedBg = dark
+        ? const Color(0xFFC9BCFF).withAlpha(36)
+        : _accent.withAlpha(30);
 
     Widget row({
       required Widget icon,
@@ -39,9 +46,9 @@ class CollectionsDrawer extends StatelessWidget {
       required VoidCallback onTap,
       VoidCallback? onLongPress,
     }) {
-      final color = selected ? _accent : text;
+      final color = selected ? selectedFg : text;
       return Material(
-        color: selected ? _accent.withAlpha(30) : Colors.transparent,
+        color: selected ? selectedBg : Colors.transparent,
         child: InkWell(
           onTap: onTap,
           onLongPress: onLongPress,
@@ -53,7 +60,7 @@ class CollectionsDrawer extends StatelessWidget {
                 children: [
                   IconTheme(
                     data: IconThemeData(
-                      color: selected ? _accent : muted,
+                      color: selected ? selectedFg : muted,
                       size: 24,
                     ),
                     child: icon,
@@ -77,7 +84,7 @@ class CollectionsDrawer extends StatelessWidget {
                     Text(
                       trailing,
                       style: GoogleFonts.inter(
-                        color: selected ? _accent : muted,
+                        color: selected ? selectedFg : muted,
                         fontSize: 13.5,
                         fontWeight: FontWeight.w500,
                       ),
@@ -154,13 +161,13 @@ class CollectionsDrawer extends StatelessWidget {
                           width: 24,
                           height: 24,
                           decoration: BoxDecoration(
-                            color: _accent.withAlpha(30),
+                            color: selectedBg,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(
+                          child: Icon(
                             collectionAddIcon,
                             size: 15,
-                            color: _accent,
+                            color: selectedFg,
                           ),
                         ),
                       ),
