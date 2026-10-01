@@ -1,8 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256"><title>Velum B - Read-along lines</title>
-<g fill="#000">
-<rect x="80" y="24" width="96" height="24" rx="12"/>
-<rect x="48" y="64" width="160" height="24" rx="12"/>
-<path fill-rule="evenodd" d="M48 100 H208 A28 28 0 0 1 208 156 H48 A28 28 0 0 1 48 100 Z M60 122 H196 A6 6 0 0 1 196 134 H60 A6 6 0 0 1 60 122 Z"/>
-<rect x="56" y="168" width="144" height="24" rx="12"/>
-<rect x="88" y="208" width="80" height="24" rx="12"/>
-</g></svg>

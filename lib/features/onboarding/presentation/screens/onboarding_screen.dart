@@ -137,7 +137,7 @@ class _WelcomePage extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(30),
             child: Image.asset(
-              'assets/icons/android/play_store_512.png',
+              'assets/app_icon.png',
               width: 120,
               height: 120,
             ),
