@@ -10,6 +10,7 @@ import 'package:velum/features/settings/presentation/providers/settings_notifier
 import 'package:velum/features/library/presentation/providers/library_notifier.dart';
 import 'package:velum/features/library/data/models/scanned_book.dart';
 import 'package:velum/core/theme/app_colors.dart';
+import 'package:velum/features/library/presentation/widgets/collections_ui.dart';
 
 const Color _accent = AppColors.accent;
 
@@ -64,6 +65,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _selectionMode = true;
       _selectedBooks.add(book.filePath);
     });
+  }
+
+  Future<void> _addSelectedToCollection(ReaderTheme theme) async {
+    final message = await showAddToCollectionSheet(
+      context,
+      theme,
+      Set.of(_selectedBooks),
+    );
+    if (message == null || !mounted) return;
+    _cancelSelection();
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(content: Text(message), duration: const Duration(seconds: 2)),
+      );
   }
 
   void _cancelSelection() {
@@ -155,6 +171,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   final GlobalKey _addButtonKey = GlobalKey();
+  final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  bool _drawerOpen = false;
 
   /// "+" button: a small popup menu just above it with the two ways to add
   /// something.
@@ -166,8 +184,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final right = screen.width - (fabTopLeft.dx + box.size.width);
     final bottom = screen.height - fabTopLeft.dy + 12;
 
-    Widget item(BuildContext menuContext, IconData icon, String label,
-        VoidCallback onTap) {
+    Widget item(
+      BuildContext menuContext,
+      IconData icon,
+      String label,
+      VoidCallback onTap,
+    ) {
       return InkWell(
         onTap: () {
           Navigator.of(menuContext).pop();
@@ -218,11 +240,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    item(menuContext, Icons.folder_open_outlined, 'From Files',
-                        notifier.pickFiles),
+                    item(
+                      menuContext,
+                      Icons.folder_open_outlined,
+                      'From Files',
+                      notifier.pickFiles,
+                    ),
                     Divider(height: 1, color: theme.textColor.withAlpha(20)),
-                    item(menuContext, Icons.edit_note, 'Create New',
-                        () => context.push('/editor')),
+                    item(
+                      menuContext,
+                      Icons.edit_note,
+                      'Create New',
+                      () => context.push('/editor'),
+                    ),
                   ],
                 ),
               ),
@@ -232,8 +262,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
       // Grow out of the + button.
       transitionBuilder: (_, animation, _, child) {
-        final curved =
-            CurvedAnimation(parent: animation, curve: Curves.easeOutCubic);
+        final curved = CurvedAnimation(
+          parent: animation,
+          curve: Curves.easeOutCubic,
+        );
         return FadeTransition(
           opacity: curved,
           child: ScaleTransition(
@@ -253,216 +285,292 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final theme = settingsNotifier.settings.appTheme;
     final books = libraryNotifier.sortedAndFilteredBooks;
 
-    return Scaffold(
-      backgroundColor: theme.backgroundColor,
-      body: RefreshIndicator(
-        onRefresh: () => libraryNotifier.refresh(),
-        color: _accent,
+    final collection = libraryNotifier.currentCollection;
+
+    return PopScope(
+      // Back inside a collection returns to all books first.
+      canPop: collection == null && !_selectionMode && !_drawerOpen,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        if (_drawerOpen) {
+          _scaffoldKey.currentState?.closeDrawer();
+        } else if (_selectionMode) {
+          _cancelSelection();
+        } else {
+          libraryNotifier.showCollection(null);
+        }
+      },
+      child: Scaffold(
+        key: _scaffoldKey,
         backgroundColor: theme.backgroundColor,
-        child: CustomScrollView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          slivers: [
-            SliverAppBar(
-              expandedHeight: 120.0,
-              floating: false,
-              pinned: true,
-              backgroundColor: theme.backgroundColor,
-              automaticallyImplyLeading: false,
-              leading: _selectionMode
-                  ? IconButton(
-                      icon: Icon(Icons.close, color: theme.textColor),
-                      onPressed: _cancelSelection,
-                    )
-                  : null,
-              title: _selectionMode
-                  ? Text(
-                      '${_selectedBooks.length} selected',
-                      style: TextStyle(color: theme.textColor),
-                    )
-                  : null,
-              actions: [
-                if (_selectionMode) ...[
-                  IconButton(
-                    icon: Icon(Icons.push_pin_outlined, color: theme.textColor),
-                    onPressed: _togglePinSelected,
-                    tooltip: 'Pin/Unpin',
-                  ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, color: Colors.red),
-                    onPressed: _selectedBooks.isNotEmpty
-                        ? _deleteSelected
-                        : null,
-                    tooltip: 'Delete',
-                  ),
-                ] else
-                  IconButton(
-                    icon: Icon(Icons.settings_outlined, color: theme.textColor),
-                    onPressed: () => context.push('/settings'),
-                    tooltip: 'Settings',
-                  ),
-                const SizedBox(width: 8),
-              ],
-              flexibleSpace: FlexibleSpaceBar(
-                titlePadding: const EdgeInsets.only(left: 20, bottom: 16),
-                title: Text(
-                  'Velum',
-                  style: TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: theme.textColor,
-                  ),
+        drawer: CollectionsDrawer(theme: theme),
+        onDrawerChanged: (open) => setState(() => _drawerOpen = open),
+        body: RefreshIndicator(
+          onRefresh: () => libraryNotifier.refresh(),
+          color: _accent,
+          backgroundColor: theme.backgroundColor,
+          child: CustomScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            slivers: [
+              SliverAppBar(
+                expandedHeight: 120.0,
+                floating: false,
+                pinned: true,
+                backgroundColor: theme.backgroundColor,
+                automaticallyImplyLeading: false,
+                leading: _selectionMode
+                    ? IconButton(
+                        icon: Icon(Icons.close, color: theme.textColor),
+                        onPressed: _cancelSelection,
+                      )
+                    : Builder(
+                        builder: (ctx) => IconButton(
+                          icon: Icon(Icons.menu, color: theme.textColor),
+                          onPressed: () => Scaffold.of(ctx).openDrawer(),
+                          tooltip: 'Collections',
+                        ),
+                      ),
+                title: _selectionMode
+                    ? Text(
+                        '${_selectedBooks.length} selected',
+                        style: TextStyle(color: theme.textColor),
+                      )
+                    : null,
+                actions: [
+                  if (_selectionMode) ...[
+                    IconButton(
+                      icon: const Icon(collectionAddIcon, color: _accent),
+                      style: IconButton.styleFrom(
+                        backgroundColor: _accent.withAlpha(30),
+                      ),
+                      onPressed: () => _addSelectedToCollection(theme),
+                      tooltip: 'Add to collection',
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        Icons.push_pin_outlined,
+                        color: theme.textColor,
+                      ),
+                      onPressed: _togglePinSelected,
+                      tooltip: 'Pin/Unpin',
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red),
+                      onPressed: _selectedBooks.isNotEmpty
+                          ? _deleteSelected
+                          : null,
+                      tooltip: 'Delete',
+                    ),
+                  ] else
+                    IconButton(
+                      icon: Icon(
+                        Icons.settings_outlined,
+                        color: theme.textColor,
+                      ),
+                      onPressed: () => context.push('/settings'),
+                      tooltip: 'Settings',
+                    ),
+                  const SizedBox(width: 8),
+                ],
+                flexibleSpace: LayoutBuilder(
+                  builder: (context, constraints) {
+                    // 1 when expanded, 0 when collapsed: slide the title right
+                    // as it collapses so it clears the menu button.
+                    final top = MediaQuery.of(context).padding.top;
+                    final t =
+                        ((constraints.maxHeight - top - kToolbarHeight) /
+                                (120.0 - kToolbarHeight))
+                            .clamp(0.0, 1.0);
+                    return FlexibleSpaceBar(
+                      titlePadding: EdgeInsets.only(
+                        left: 20 + 52 * (1 - t),
+                        right: 72,
+                        bottom: 16,
+                      ),
+                      // In selection mode the toolbar shows "N selected".
+                      title: _selectionMode && t < 0.5
+                          ? null
+                          : Text(
+                              collection?.name ?? 'Velum',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                                color: theme.textColor,
+                              ),
+                            ),
+                    );
+                  },
                 ),
               ),
-            ),
 
-            // Search and Sort Bar
-            if (!_selectionMode)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
-                  child: Row(
-                    children: [
-                      // Search Bar
-                      Expanded(
-                        child: Container(
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: theme.textColor.withAlpha(15),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          child: TextField(
-                            controller: _searchController,
-                            style: GoogleFonts.inter(
-                              color: theme.textColor,
-                              fontSize: 16,
+              // Search and Sort Bar
+              if (!_selectionMode)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                    child: Row(
+                      children: [
+                        // Search Bar
+                        Expanded(
+                          child: Container(
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: theme.textColor.withAlpha(15),
+                              borderRadius: BorderRadius.circular(16),
                             ),
-                            onChanged: _onSearchChanged,
-                            decoration: InputDecoration(
-                              hintText: 'Search books...',
-                              hintStyle: GoogleFonts.inter(
-                                color: theme.textColor.withAlpha(100),
+                            child: TextField(
+                              controller: _searchController,
+                              style: GoogleFonts.inter(
+                                color: theme.textColor,
                                 fontSize: 16,
                               ),
-                              prefixIcon: Icon(
-                                Icons.search,
-                                color: theme.textColor.withAlpha(100),
-                              ),
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 20,
-                                vertical:
-                                    16, // Vertically centered in 56px height
+                              onChanged: _onSearchChanged,
+                              decoration: InputDecoration(
+                                hintText: 'Search books...',
+                                hintStyle: GoogleFonts.inter(
+                                  color: theme.textColor.withAlpha(100),
+                                  fontSize: 16,
+                                ),
+                                prefixIcon: Icon(
+                                  Icons.search,
+                                  color: theme.textColor.withAlpha(100),
+                                ),
+                                border: InputBorder.none,
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 20,
+                                  vertical:
+                                      16, // Vertically centered in 56px height
+                                ),
                               ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 16),
-                      // Sort Toggle Button
-                      GestureDetector(
-                        onTap: () {
-                          final newSort =
-                              libraryNotifier.currentSort ==
-                                  LibrarySortOption.recent
-                              ? LibrarySortOption.alphabetical
-                              : LibrarySortOption.recent;
-                          libraryNotifier.setSortOption(newSort);
-                        },
-                        child: Container(
-                          height: 56,
-                          decoration: BoxDecoration(
-                            color: theme.textColor.withAlpha(15),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          child: Row(
-                            children: [
-                              Text(
+                        const SizedBox(width: 16),
+                        // Sort Toggle Button
+                        GestureDetector(
+                          onTap: () {
+                            final newSort =
                                 libraryNotifier.currentSort ==
-                                        LibrarySortOption.recent
-                                    ? 'Recent'
-                                    : 'A-Z',
-                                style: GoogleFonts.inter(
-                                  color: theme.textColor,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w500,
+                                    LibrarySortOption.recent
+                                ? LibrarySortOption.alphabetical
+                                : LibrarySortOption.recent;
+                            libraryNotifier.setSortOption(newSort);
+                          },
+                          child: Container(
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: theme.textColor.withAlpha(15),
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            child: Row(
+                              children: [
+                                Text(
+                                  libraryNotifier.currentSort ==
+                                          LibrarySortOption.recent
+                                      ? 'Recent'
+                                      : 'A-Z',
+                                  style: GoogleFonts.inter(
+                                    color: theme.textColor,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                  ),
                                 ),
-                              ),
-                              Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: Icon(
-                                  Icons.sort,
-                                  color: theme.textColor.withAlpha(180),
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 8),
+                                  child: Icon(
+                                    Icons.sort,
+                                    color: theme.textColor.withAlpha(180),
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ),
-              ),
 
-            if (books.isEmpty && libraryNotifier.searchQuery.isNotEmpty)
-              SliverFillRemaining(
-                child: Center(
-                  child: Text(
-                    'No books found matching "${libraryNotifier.searchQuery}"',
-                    style: TextStyle(color: theme.textColor.withAlpha(150)),
+              if (books.isEmpty && libraryNotifier.searchQuery.isNotEmpty)
+                SliverFillRemaining(
+                  child: Center(
+                    child: Text(
+                      'No books found matching "${libraryNotifier.searchQuery}"',
+                      style: TextStyle(color: theme.textColor.withAlpha(150)),
+                    ),
                   ),
-                ),
-              )
-            else if (books.isEmpty)
-              SliverFillRemaining(
-                child: _buildEmptyState(context, theme, libraryNotifier),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 20,
-                ),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    childAspectRatio: 0.7,
-                    crossAxisSpacing: 20,
-                    mainAxisSpacing: 20,
-                  ),
-                  delegate: SliverChildBuilderDelegate((context, index) {
-                    final book = books[index];
-                    return _buildBookItem(
-                      context,
-                      book,
-                      theme,
-                      libraryNotifier, // Pass notifier to handle tap updates
-                    );
-                  }, childCount: books.length),
-                ),
-              ),
-          ],
-        ),
-      ),
-      floatingActionButton: !_selectionMode
-          ? FloatingActionButton(
-              key: _addButtonKey,
-              onPressed: libraryNotifier.isScanning
-                  ? null
-                  : () => _showAddMenu(theme, libraryNotifier),
-              backgroundColor: _accent,
-              child: libraryNotifier.isScanning
-                  ? const SizedBox(
-                      width: 24,
-                      height: 24,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: Colors.white,
+                )
+              else if (books.isEmpty && collection != null)
+                SliverFillRemaining(
+                  child: Padding(
+                    padding: const EdgeInsets.all(40),
+                    child: Center(
+                      child: Text(
+                        'This collection is empty.\nLong-press books in All books, then tap the folder to add them here.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: theme.textColor.withAlpha(150),
+                          height: 1.5,
+                        ),
                       ),
-                    )
-                  : const Icon(Icons.add, color: Colors.white),
-            )
-          : null,
+                    ),
+                  ),
+                )
+              else if (books.isEmpty)
+                SliverFillRemaining(
+                  child: _buildEmptyState(context, theme, libraryNotifier),
+                )
+              else
+                SliverPadding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 20,
+                  ),
+                  sliver: SliverGrid(
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          childAspectRatio: 0.7,
+                          crossAxisSpacing: 20,
+                          mainAxisSpacing: 20,
+                        ),
+                    delegate: SliverChildBuilderDelegate((context, index) {
+                      final book = books[index];
+                      return _buildBookItem(
+                        context,
+                        book,
+                        theme,
+                        libraryNotifier, // Pass notifier to handle tap updates
+                      );
+                    }, childCount: books.length),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        floatingActionButton: !_selectionMode
+            ? FloatingActionButton(
+                key: _addButtonKey,
+                onPressed: libraryNotifier.isScanning
+                    ? null
+                    : () => _showAddMenu(theme, libraryNotifier),
+                backgroundColor: _accent,
+                child: libraryNotifier.isScanning
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.add, color: Colors.white),
+              )
+            : null,
+      ),
     );
   }
 

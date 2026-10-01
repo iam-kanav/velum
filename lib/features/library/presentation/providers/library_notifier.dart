@@ -1,19 +1,82 @@
 import 'package:flutter/material.dart';
 import '../../data/models/scanned_book.dart';
+import '../../data/models/book_collection.dart';
+import '../../data/services/collection_service.dart';
 import '../../data/services/library_service.dart';
 
 enum LibrarySortOption { recent, alphabetical }
 
 class LibraryNotifier extends ChangeNotifier {
   final LibraryService _libraryService;
+  final CollectionService _collectionService;
 
-  LibraryNotifier(this._libraryService) {
+  LibraryNotifier(this._libraryService, this._collectionService) {
+    _collections = _collectionService.load();
     _loadBooks();
     _initAutoScan();
   }
 
   List<ScannedBook> _books = [];
   List<ScannedBook> get books => _books;
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // COLLECTIONS
+  // ════════════════════════════════════════════════════════════════════════════
+
+  List<BookCollection> _collections = [];
+  List<BookCollection> get collections => _collections;
+
+  /// The collection being shown, or null for all books.
+  String? _currentCollectionId;
+  BookCollection? get currentCollection =>
+      _collections.where((c) => c.id == _currentCollectionId).firstOrNull;
+
+  /// Books of [collection] that are still in the library.
+  int bookCount(BookCollection collection) {
+    final paths = _books.map((b) => b.filePath).toSet();
+    return collection.bookPaths.where(paths.contains).length;
+  }
+
+  void showCollection(String? id) {
+    _currentCollectionId = id;
+    _sortedAndFilteredCache = null;
+    notifyListeners();
+  }
+
+  void _reloadCollections() {
+    _collections = _collectionService.load();
+    if (currentCollection == null) _currentCollectionId = null;
+    _sortedAndFilteredCache = null;
+    notifyListeners();
+  }
+
+  Future<BookCollection> createCollection(
+    String name, [
+    Iterable<String> bookPaths = const [],
+  ]) async {
+    final c = await _collectionService.create(name, bookPaths.toList());
+    _reloadCollections();
+    return c;
+  }
+
+  Future<void> renameCollection(String id, String name) async {
+    await _collectionService.rename(id, name);
+    _reloadCollections();
+  }
+
+  Future<void> deleteCollection(String id) async {
+    await _collectionService.delete(id);
+    _reloadCollections();
+  }
+
+  Future<void> setInCollection(
+    String id,
+    Iterable<String> bookPaths,
+    bool member,
+  ) async {
+    await _collectionService.setMembership(id, bookPaths, member);
+    _reloadCollections();
+  }
 
   String _searchQuery = '';
   String get searchQuery => _searchQuery;
@@ -43,6 +106,13 @@ class LibraryNotifier extends ChangeNotifier {
     if (_sortedAndFilteredCache != null) return _sortedAndFilteredCache!;
 
     List<ScannedBook> filtered = List.from(_books);
+
+    // 0. Limit to the open collection
+    final collection = currentCollection;
+    if (collection != null) {
+      final paths = collection.bookPaths.toSet();
+      filtered = filtered.where((b) => paths.contains(b.filePath)).toList();
+    }
 
     // 1. Filter by search query
     if (_searchQuery.isNotEmpty) {
@@ -208,6 +278,8 @@ class LibraryNotifier extends ChangeNotifier {
 
   Future<void> removeBook(ScannedBook book) async {
     await _libraryService.removeBook(book.filePath);
+    await _collectionService.forgetBook(book.filePath);
+    _collections = _collectionService.load();
     _loadBooks();
   }
 }

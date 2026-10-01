@@ -31,6 +31,7 @@ Open an EPUB, press play, and follow along as each sentence lights up.
 - ▶️ **Starts where you are.** Press play to begin at the first sentence on screen, or double-tap any sentence to jump straight to it.
 - 📝 **Create New.** Tap **+** → **Create New**, then write or paste anything (a whole Google Doc, an article, notes) and listen to it like a book. Headings, lists and bold/italic come along; colours and clutter don't.
 - 📚 **Library.** Finds the EPUBs on your device automatically, with covers, search, sorting and pinning.
+- 🗂️ **Collections.** Long-press books, tap the folder button, and group them ("Classics", "To read"). Open a collection from the ☰ menu; a book can be in as many as you like.
 - 📖 **Remembers your place.** Every chapter keeps its own scroll position and read-aloud spot, even after you close the app.
 - 🖍️ **Highlights and bookmarks.** Select text and a small colour pill appears just below it. Bookmarks save your exact spot.
 - 🔍 **Search the whole book** with snippets that take you right to the match.
@@ -156,7 +157,7 @@ lib/
 ├── main.dart                 # Startup: storage, audio service, providers
 ├── core/                     # Router, theme, ads
 └── features/
-    ├── library/              # Library screen, scanning, imports
+    ├── library/              # Library screen, collections, scanning, imports
     ├── notes/                # Create New: note editor + note storage
     ├── onboarding/           # First-launch setup
     ├── reader/               # Reader screen, chapter processor, highlights, bookmarks
@@ -165,7 +166,7 @@ lib/
 assets/js/
 ├── reader.js                 # Page script: gestures, highlights, follow mode
 └── editor.html               # Note editor: title, writing area, paste clean-up
-test/                         # Sentence alignment and note tests
+test/                         # Sentence alignment, note and collection tests
 ```
 
 </details>

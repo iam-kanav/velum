@@ -23,6 +23,7 @@ import 'features/tts/data/services/edge_tts_engine.dart';
 import 'features/tts/data/services/velum_audio_handler.dart';
 
 import 'core/providers/ad_notifier.dart';
+import 'features/library/data/services/collection_service.dart';
 
 late VelumAudioHandler audioHandler;
 
@@ -98,7 +99,10 @@ class MainApp extends StatelessWidget {
               SettingsNotifier(context.read<SharedPreferences>()),
         ),
         ChangeNotifierProvider(
-          create: (context) => LibraryNotifier(context.read<LibraryService>()),
+          create: (context) => LibraryNotifier(
+            context.read<LibraryService>(),
+            CollectionService(context.read<SharedPreferences>()),
+          ),
         ),
         ChangeNotifierProvider(create: (_) => AdNotifier()),
         Provider<VelumAudioHandler>.value(value: audioHandler),

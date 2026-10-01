@@ -1,0 +1,32 @@
+/// A user-made group of books ("Classics", "To read"). A book can be in any
+/// number of collections; [bookPaths] are library file paths.
+class BookCollection {
+  final String id;
+  final String name;
+  final List<String> bookPaths;
+
+  const BookCollection({
+    required this.id,
+    required this.name,
+    this.bookPaths = const [],
+  });
+
+  BookCollection copyWith({String? name, List<String>? bookPaths}) =>
+      BookCollection(
+        id: id,
+        name: name ?? this.name,
+        bookPaths: bookPaths ?? this.bookPaths,
+      );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'bookPaths': bookPaths,
+  };
+
+  factory BookCollection.fromJson(Map<String, dynamic> json) => BookCollection(
+    id: json['id'] as String,
+    name: json['name'] as String,
+    bookPaths: List<String>.from(json['bookPaths'] as List? ?? const []),
+  );
+}

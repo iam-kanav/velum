@@ -47,10 +47,13 @@ Future<ScannedBook> _parseEpubInIsolate(
 Future<String?> _extractCover(EpubBookRef bookRef) async {
   final images = bookRef.Content?.Images;
   if (images == null || images.isEmpty) return null;
-  final key = ['cover', 'front', 'title']
-          .map((pattern) => images.keys
-              .where((k) => k.toLowerCase().contains(pattern))
-              .firstOrNull)
+  final key =
+      ['cover', 'front', 'title']
+          .map(
+            (pattern) => images.keys
+                .where((k) => k.toLowerCase().contains(pattern))
+                .firstOrNull,
+          )
           .firstWhere((k) => k != null, orElse: () => null) ??
       images.keys.first;
   return base64Encode(await images[key]!.readContentAsBytes());
