@@ -41,9 +41,12 @@ Velum reads aloud with the **speech engine installed on your phone** (via [`flut
 - Choose the speech engine and voice, with one-tap voice preview
 - Adjustable speed (0.2×–2.0×), pitch, and volume
 - **Sentence-level or paragraph-level highlighting** that auto-scrolls to follow along
-- Double-tap any paragraph or sentence to jump playback to that point
+- Press Play to start from the first sentence on screen; double-tap any paragraph or sentence to jump playback to that point
+- Scroll away while listening and the page stops following the voice; tap **Back to reading** to return
+- **Sleep timer** — stop after 15, 30 or 60 minutes, or at the end of the chapter
 - Auto-advance to the next chapter when the current one finishes
 - Optionally stop when another app takes audio focus
+- Book and chapter shown on the lock screen and in the media notification
 
 <p align="center">
   <img src="Mockup Screenshots/Light/light_tts_settings.png" width="28%" alt="TTS Settings – Light" />

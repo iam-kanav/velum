@@ -45,8 +45,12 @@ class _BannerAdWidgetState extends State<BannerAdWidget> {
   Widget build(BuildContext context) {
     final adNotifier = context.watch<AdNotifier>();
 
-    if (!adNotifier.showBanner || !_isLoaded || _bannerAd == null) {
-      return const SizedBox.shrink();
+    if (!adNotifier.showBanner) return const SizedBox.shrink();
+
+    // Reserve the banner's height before it loads so the reader's bottom bar
+    // doesn't jump up under the user's finger when the ad appears.
+    if (!_isLoaded || _bannerAd == null) {
+      return SizedBox(height: AdSize.banner.height.toDouble());
     }
 
     return SizedBox(

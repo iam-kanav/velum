@@ -15,6 +15,19 @@ enum TtsHighlightMode {
   }
 }
 
+/// Sleep timer choices: stop after a duration or at the end of the chapter.
+enum SleepTimer {
+  off(null, 'Off'),
+  min15(Duration(minutes: 15), '15 min'),
+  min30(Duration(minutes: 30), '30 min'),
+  min60(Duration(minutes: 60), '60 min'),
+  endOfChapter(null, 'End of chapter');
+
+  final Duration? duration;
+  final String label;
+  const SleepTimer(this.duration, this.label);
+}
+
 /// TTS playback state
 enum TtsState { idle, playing, paused, stopped }
 

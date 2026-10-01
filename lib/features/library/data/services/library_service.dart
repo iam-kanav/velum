@@ -18,15 +18,17 @@ Future<ScannedBook> _parseEpubInIsolate(
 ) async {
   final (bytes, fileName, filePath) = params;
   try {
-    final epubBook = await EpubReader.readBook(bytes);
+    // Only title, author and one cover image are needed, so open the book
+    // lazily instead of unpacking (and decoding) everything.
+    final bookRef = await EpubReader.openBook(bytes);
     String? coverBase64;
     try {
-      coverBase64 = _extractCoverFromEpub(epubBook);
+      coverBase64 = await _extractCover(bookRef);
     } catch (_) {}
     return ScannedBook(
       filePath: filePath,
-      title: epubBook.Title ?? fileName.replaceAll('.epub', ''),
-      author: epubBook.Author ?? 'Unknown Author',
+      title: bookRef.Title ?? fileName.replaceAll('.epub', ''),
+      author: bookRef.Author ?? 'Unknown Author',
       addedAt: DateTime.now(),
       coverBase64: coverBase64,
     );
@@ -40,27 +42,17 @@ Future<ScannedBook> _parseEpubInIsolate(
   }
 }
 
-/// Top-level helper for cover extraction inside the isolate.
-String? _extractCoverFromEpub(EpubBook epubBook) {
-  if (epubBook.Content?.Images == null) return null;
-  final images = epubBook.Content!.Images!;
-  final coverPatterns = ['cover', 'front', 'title'];
-  for (final pattern in coverPatterns) {
-    for (final entry in images.entries) {
-      if (entry.key.toLowerCase().contains(pattern)) {
-        if (entry.value.Content != null) {
-          return base64Encode(entry.value.Content!);
-        }
-      }
-    }
-  }
-  if (images.isNotEmpty) {
-    final firstImage = images.values.first;
-    if (firstImage.Content != null) {
-      return base64Encode(firstImage.Content!);
-    }
-  }
-  return null;
+/// Pick the cover image (by name, else the first image) and read only it.
+Future<String?> _extractCover(EpubBookRef bookRef) async {
+  final images = bookRef.Content?.Images;
+  if (images == null || images.isEmpty) return null;
+  final key = ['cover', 'front', 'title']
+          .map((pattern) => images.keys
+              .where((k) => k.toLowerCase().contains(pattern))
+              .firstOrNull)
+          .firstWhere((k) => k != null, orElse: () => null) ??
+      images.keys.first;
+  return base64Encode(await images[key]!.readContentAsBytes());
 }
 
 class LibraryService {

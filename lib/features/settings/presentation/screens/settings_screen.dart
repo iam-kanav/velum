@@ -4,8 +4,9 @@ import 'package:provider/provider.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
 import 'package:velum/features/library/presentation/providers/library_notifier.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
-const Color _accentGreen = Color(0xFF4CAF50);
+const Color _accent = AppColors.accent;
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -210,7 +211,7 @@ class SettingsScreen extends StatelessWidget {
               ),
               Switch(
                 value: libraryNotifier.isAutoScanEnabled,
-                activeThumbColor: _accentGreen,
+                activeThumbColor: _accent,
                 onChanged: (value) async {
                   if (value) {
                     final granted = await libraryNotifier
@@ -275,8 +276,8 @@ class SettingsScreen extends StatelessWidget {
                       }
                     },
               style: OutlinedButton.styleFrom(
-                foregroundColor: _accentGreen,
-                side: const BorderSide(color: _accentGreen),
+                foregroundColor: _accent,
+                side: const BorderSide(color: _accent),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -287,7 +288,7 @@ class SettingsScreen extends StatelessWidget {
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: _accentGreen.withAlpha(150),
+                        color: _accent.withAlpha(150),
                       ),
                     )
                   : const Icon(Icons.manage_search, size: 20),
@@ -396,14 +397,14 @@ class SettingsScreen extends StatelessWidget {
                   shape: BoxShape.circle,
                   border: Border.all(
                     color: isSelected
-                        ? _accentGreen
+                        ? _accent
                         : Colors.grey.withAlpha(60),
                     width: isSelected ? 3 : 1,
                   ),
                   boxShadow: isSelected
                       ? [
                           BoxShadow(
-                            color: _accentGreen.withAlpha(60),
+                            color: _accent.withAlpha(60),
                             blurRadius: 12,
                             spreadRadius: 2,
                           ),
@@ -459,10 +460,10 @@ class SettingsScreen extends StatelessWidget {
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: isSelected ? _accentGreen : Colors.transparent,
+                color: isSelected ? _accent : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: isSelected ? _accentGreen : Colors.grey.withAlpha(80),
+                  color: isSelected ? _accent : Colors.grey.withAlpha(80),
                   width: 1.5,
                 ),
               ),
@@ -485,10 +486,10 @@ class SettingsScreen extends StatelessWidget {
               duration: const Duration(milliseconds: 200),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: isSelected ? _accentGreen : Colors.transparent,
+                color: isSelected ? _accent : Colors.transparent,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: isSelected ? _accentGreen : Colors.grey.withAlpha(80),
+                  color: isSelected ? _accent : Colors.grey.withAlpha(80),
                   width: 1.5,
                 ),
               ),
@@ -608,10 +609,10 @@ class SettingsScreen extends StatelessWidget {
         const SizedBox(height: 8),
         SliderTheme(
           data: SliderThemeData(
-            activeTrackColor: _accentGreen,
+            activeTrackColor: _accent,
             inactiveTrackColor: Colors.grey.withAlpha(60),
-            thumbColor: _accentGreen,
-            overlayColor: _accentGreen.withAlpha(30),
+            thumbColor: _accent,
+            overlayColor: _accent.withAlpha(30),
             trackHeight: 4,
           ),
           child: Slider(

@@ -126,19 +126,21 @@ class EdgeTtsEngine extends TtsEngine {
     }
   }
 
-  /// 'en-US-EmmaMultilingualNeural' + 'Female' → 'Emma (Female)'
+  /// 'en-US-EmmaNeural' + 'Female' → 'Emma (Female)';
+  /// 'en-US-EmmaMultilingualNeural' → 'Emma (Female, Multilingual)', so the
+  /// two variants of a voice don't look like duplicates.
   static String _voiceLabel(String shortName, String gender) {
     final parts = shortName.split('-');
     if (parts.length < 3) return shortName;
-    final name = parts
-        .sublist(2)
-        .join('-')
-        .replaceAll('MultilingualNeural', '')
-        .replaceAll('Neural', '')
-        .replaceAll('Multilingual', '');
+    final raw = parts.sublist(2).join('-');
+    final name = raw.replaceAll('Neural', '').replaceAll('Multilingual', '');
     if (name.isEmpty) return shortName;
-    if (gender.isEmpty) return name;
-    return '$name (${gender[0].toUpperCase()}${gender.substring(1).toLowerCase()})';
+    final details = [
+      if (gender.isNotEmpty)
+        '${gender[0].toUpperCase()}${gender.substring(1).toLowerCase()}',
+      if (raw.contains('Multilingual')) 'Multilingual',
+    ];
+    return details.isEmpty ? name : '$name (${details.join(', ')})';
   }
 
   @override

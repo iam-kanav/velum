@@ -3,8 +3,9 @@ import 'package:provider/provider.dart';
 import '../../data/models/tts_settings.dart';
 import '../../data/services/device_tts_engine.dart';
 import '../providers/tts_notifier.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
-const Color _accentGreen = Color(0xFF4CAF50);
+const Color _accent = AppColors.accent;
 
 const _languageNames = <String, String>{
   'af': 'Afrikaans',
@@ -357,6 +358,11 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           // Highlight Mode
           _buildHighlightModeSelector(ttsNotifier),
 
+          const SizedBox(height: 20),
+
+          // Sleep Timer
+          _buildSleepTimerSelector(ttsNotifier),
+
           const SizedBox(height: 16),
 
           // Auto-Continue Toggle
@@ -520,9 +526,9 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                     width: 32,
                     height: 32,
                     decoration: BoxDecoration(
-                      color: _accentGreen.withAlpha(20),
+                      color: _accent.withAlpha(20),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _accentGreen.withAlpha(60)),
+                      border: Border.all(color: _accent.withAlpha(60)),
                     ),
                     child: Center(
                       child: _isPreviewing
@@ -531,10 +537,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                               height: 14,
                               child: CircularProgressIndicator(
                                 strokeWidth: 1.5,
-                                color: _accentGreen,
+                                color: _accent,
                               ),
                             )
-                          : Icon(Icons.volume_up, size: 16, color: _accentGreen),
+                          : Icon(Icons.volume_up, size: 16, color: _accent),
                     ),
                   ),
                 ),
@@ -586,10 +592,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         ),
         SliderTheme(
           data: SliderThemeData(
-            activeTrackColor: _accentGreen,
+            activeTrackColor: _accent,
             inactiveTrackColor: widget.textColor.withAlpha(40),
-            thumbColor: _accentGreen,
-            overlayColor: _accentGreen.withAlpha(30),
+            thumbColor: _accent,
+            overlayColor: _accent.withAlpha(30),
             trackHeight: 3,
           ),
           child: Slider(value: value, min: min, max: max, onChanged: onChanged),
@@ -625,11 +631,11 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: isSelected ? _accentGreen : Colors.transparent,
+                    color: isSelected ? _accent : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
                       color: isSelected
-                          ? _accentGreen
+                          ? _accent
                           : widget.textColor.withAlpha(60),
                     ),
                   ),
@@ -678,8 +684,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         Switch(
           value: ttsNotifier.settings.autoContinue,
           onChanged: (value) => ttsNotifier.updateAutoContinue(value),
-          activeThumbColor: _accentGreen,
-          activeTrackColor: _accentGreen.withAlpha(80),
+          activeThumbColor: _accent,
+          activeTrackColor: _accent.withAlpha(80),
         ),
       ],
     );
@@ -711,8 +717,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         Switch(
           value: ttsNotifier.settings.stopOnAudioFocusLoss,
           onChanged: (value) => ttsNotifier.updateStopOnAudioFocusLoss(value),
-          activeThumbColor: _accentGreen,
-          activeTrackColor: _accentGreen.withAlpha(80),
+          activeThumbColor: _accent,
+          activeTrackColor: _accent.withAlpha(80),
         ),
       ],
     );
@@ -760,10 +766,72 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             Switch(
               value: enabled,
               onChanged: (value) => ttsNotifier.setUseEdgeTts(value),
-              activeThumbColor: _accentGreen,
-              activeTrackColor: _accentGreen.withAlpha(80),
+              activeThumbColor: _accent,
+              activeTrackColor: _accent.withAlpha(80),
             ),
           ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSleepTimerSelector(TtsNotifier ttsNotifier) {
+    final current = ttsNotifier.sleepTimer;
+    final remaining = ttsNotifier.sleepRemaining;
+    final status = switch (current) {
+      SleepTimer.off => null,
+      SleepTimer.endOfChapter => 'Stops at the end of this chapter',
+      _ => remaining == null
+          ? null
+          : 'Stops in ${(remaining.inSeconds / 60).ceil().clamp(1, 999)} min',
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Sleep Timer',
+          style: TextStyle(
+            color: widget.textColor.withAlpha(200),
+            fontSize: 14,
+          ),
+        ),
+        if (status != null)
+          Text(
+            status,
+            style: TextStyle(
+              color: widget.textColor.withAlpha(120),
+              fontSize: 11,
+            ),
+          ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: SleepTimer.values.map((timer) {
+            final isSelected = current == timer;
+            return GestureDetector(
+              onTap: () => ttsNotifier.setSleepTimer(timer),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isSelected ? _accent : Colors.transparent,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isSelected ? _accent : widget.textColor.withAlpha(60),
+                  ),
+                ),
+                child: Text(
+                  timer.label,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: isSelected ? Colors.white : widget.textColor,
+                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
         ),
       ],
     );

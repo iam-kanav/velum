@@ -8,8 +8,9 @@ import '../../data/models/highlight.dart';
 import '../providers/highlight_notifier.dart';
 import '../providers/bookmark_notifier.dart';
 import '../providers/reader_notifier.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
-const Color _accentGreen = Color(0xFF4CAF50);
+const Color _accent = AppColors.accent;
 
 const Map<String, Color> highlightColors = {
   'yellow': Color(0xFFFFF176),
@@ -110,9 +111,9 @@ class _HighlightsModalState extends State<HighlightsModal>
           // Tab bar
           TabBar(
             controller: _tabController,
-            labelColor: _accentGreen,
+            labelColor: _accent,
             unselectedLabelColor: readerTheme.textColor.withAlpha(150),
-            indicatorColor: _accentGreen,
+            indicatorColor: _accent,
             tabs: [
               Tab(
                 child: Row(
@@ -250,13 +251,13 @@ class _HighlightsModalState extends State<HighlightsModal>
             margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _accentGreen.withAlpha(15),
+              color: _accent.withAlpha(15),
               borderRadius: BorderRadius.circular(10),
-              border: Border(left: BorderSide(color: _accentGreen, width: 3)),
+              border: Border(left: BorderSide(color: _accent, width: 3)),
             ),
             child: Row(
               children: [
-                Icon(Icons.bookmark, color: _accentGreen, size: 20),
+                Icon(Icons.bookmark, color: _accent, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(

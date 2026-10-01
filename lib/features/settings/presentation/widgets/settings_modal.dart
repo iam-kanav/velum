@@ -4,8 +4,9 @@ import 'package:provider/provider.dart';
 import '../../data/models/reader_settings.dart';
 import '../providers/settings_notifier.dart';
 import '../../../tts/presentation/widgets/tts_settings_section.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
-const Color _accentGreen = Color(0xFF4CAF50);
+const Color _accent = AppColors.accent;
 
 class SettingsModal extends StatefulWidget {
   const SettingsModal({super.key});
@@ -107,10 +108,10 @@ class _SettingsModalState extends State<SettingsModal> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: isSelected ? _accentGreen.withAlpha(30) : Colors.transparent,
+            color: isSelected ? _accent.withAlpha(30) : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected ? _accentGreen : theme.textColor.withAlpha(40),
+              color: isSelected ? _accent : theme.textColor.withAlpha(40),
               width: isSelected ? 1.5 : 1,
             ),
           ),
@@ -121,7 +122,7 @@ class _SettingsModalState extends State<SettingsModal> {
                 icon,
                 size: 18,
                 color: isSelected
-                    ? _accentGreen
+                    ? _accent
                     : theme.textColor.withAlpha(150),
               ),
               const SizedBox(width: 6),
@@ -131,7 +132,7 @@ class _SettingsModalState extends State<SettingsModal> {
                   fontSize: 13,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
                   color: isSelected
-                      ? _accentGreen
+                      ? _accent
                       : theme.textColor.withAlpha(200),
                 ),
               ),
@@ -172,12 +173,12 @@ class _SettingsModalState extends State<SettingsModal> {
                         color: theme.backgroundColor,
                         shape: BoxShape.circle,
                         border: isSelected
-                            ? Border.all(color: _accentGreen, width: 2.5)
+                            ? Border.all(color: _accent, width: 2.5)
                             : Border.all(color: Colors.grey.withAlpha(60)),
                         boxShadow: [
                           if (isSelected)
                             BoxShadow(
-                              color: _accentGreen.withAlpha(50),
+                              color: _accent.withAlpha(50),
                               blurRadius: 8,
                             ),
                         ],
@@ -226,12 +227,12 @@ class _SettingsModalState extends State<SettingsModal> {
                           ),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? _accentGreen
+                                ? _accent
                                 : Colors.transparent,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                               color: isSelected
-                                  ? _accentGreen
+                                  ? _accent
                                   : readerTheme.textColor.withAlpha(60),
                             ),
                           ),
@@ -268,11 +269,11 @@ class _SettingsModalState extends State<SettingsModal> {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: isSelected ? _accentGreen : Colors.transparent,
+                          color: isSelected ? _accent : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: isSelected
-                                ? _accentGreen
+                                ? _accent
                                 : readerTheme.textColor.withAlpha(60),
                           ),
                         ),
@@ -375,9 +376,9 @@ class _SettingsModalState extends State<SettingsModal> {
             builder: (context, notifier, _) {
               return SliderTheme(
                 data: SliderThemeData(
-                  activeTrackColor: _accentGreen,
+                  activeTrackColor: _accent,
                   inactiveTrackColor: readerTheme.textColor.withAlpha(40),
-                  thumbColor: _accentGreen,
+                  thumbColor: _accent,
                 ),
                 child: Slider(
                   value: notifier.settings.fontSize,
@@ -416,9 +417,9 @@ class _SettingsModalState extends State<SettingsModal> {
             builder: (context, notifier, _) {
               return SliderTheme(
                 data: SliderThemeData(
-                  activeTrackColor: _accentGreen,
+                  activeTrackColor: _accent,
                   inactiveTrackColor: readerTheme.textColor.withAlpha(40),
-                  thumbColor: _accentGreen,
+                  thumbColor: _accent,
                 ),
                 child: Slider(
                   value: notifier.settings.lineHeight,
@@ -457,9 +458,9 @@ class _SettingsModalState extends State<SettingsModal> {
             builder: (context, notifier, _) {
               return SliderTheme(
                 data: SliderThemeData(
-                  activeTrackColor: _accentGreen,
+                  activeTrackColor: _accent,
                   inactiveTrackColor: readerTheme.textColor.withAlpha(40),
-                  thumbColor: _accentGreen,
+                  thumbColor: _accent,
                 ),
                 child: Slider(
                   value: notifier.settings.paragraphSpacing,
@@ -498,9 +499,9 @@ class _SettingsModalState extends State<SettingsModal> {
             builder: (context, notifier, _) {
               return SliderTheme(
                 data: SliderThemeData(
-                  activeTrackColor: _accentGreen,
+                  activeTrackColor: _accent,
                   inactiveTrackColor: readerTheme.textColor.withAlpha(40),
-                  thumbColor: _accentGreen,
+                  thumbColor: _accent,
                 ),
                 child: Slider(
                   value: notifier.settings.horizontalMargin,
@@ -535,10 +536,10 @@ class _SettingsModalState extends State<SettingsModal> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                         decoration: BoxDecoration(
-                          color: isSelected ? _accentGreen : Colors.transparent,
+                          color: isSelected ? _accent : Colors.transparent,
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
-                            color: isSelected ? _accentGreen : readerTheme.textColor.withAlpha(60),
+                            color: isSelected ? _accent : readerTheme.textColor.withAlpha(60),
                           ),
                         ),
                         child: Text(

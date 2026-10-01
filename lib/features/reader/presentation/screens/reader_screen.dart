@@ -28,8 +28,9 @@ import 'package:velum/features/reader/presentation/widgets/color_picker_bar.dart
 import 'package:velum/features/reader/presentation/widgets/global_search_overlay.dart';
 import 'package:velum/features/reader/presentation/widgets/book_complete_overlay.dart';
 import 'package:velum/features/reader/presentation/widgets/tts_fab.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
-const Color _accentGreen = Color(0xFF4CAF50);
+const Color _accent = AppColors.accent;
 
 class ReaderScreen extends StatefulWidget {
   final String assetPath;
@@ -50,6 +51,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   String? _lastHighlightKey; // Track current TTS highlight position
   bool _isPageReady = false; // Track if JS is injected and ready
   bool _showTutorial = false; // First-time tutorial overlay
+  bool _followOff = false; // User scrolled away from the spoken sentence
   bool _showBookComplete = false; // End-of-book celebration screen
 
   // Cache for custom font base64 to avoid blocking file I/O on every content load
@@ -144,19 +146,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         _animatePageTurn(-1);
         Future.delayed(const Duration(milliseconds: 500), () {
           if (mounted) {
-            final paragraphs = readerNotifier.ttsParagraphs;
-            if (paragraphs.isNotEmpty) {
-              _ttsNotifier!.loadContent(paragraphs);
-
-              // Update notification metadata for new chapter
-              context.read<VelumAudioHandler>().setMediaMetadata(
-                bookTitle: readerNotifier.currentBook?.Title ?? 'Unknown Book',
-                chapterTitle:
-                    readerNotifier.currentChapter?.Title ?? 'Unknown Chapter',
-              );
-
-              _ttsNotifier!.play();
-            }
+            if (_loadTts()) _ttsNotifier!.play();
           }
         });
       };
@@ -341,7 +331,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                   }
                 : null,
             style: FilledButton.styleFrom(
-              backgroundColor: _accentGreen,
+              backgroundColor: _accent,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
@@ -413,8 +403,13 @@ class _ReaderScreenState extends State<ReaderScreen>
               notifier.previousChapter();
               break;
             default:
+              // Read-aloud follow mode toggled by the user scrolling away/back
+              if (message.message.startsWith('tts-follow:')) {
+                final off = message.message == 'tts-follow:off';
+                if (off != _followOff) setState(() => _followOff = off);
+              }
               // Handle external URL opening
-              if (message.message.startsWith('open-url:')) {
+              else if (message.message.startsWith('open-url:')) {
                 final url = message.message.substring(9);
                 _openExternalUrl(url);
               }
@@ -454,11 +449,9 @@ class _ReaderScreenState extends State<ReaderScreen>
                     ? int.tryParse(parts[1])
                     : null;
                 if (paraIndex != null) {
-                  final ttsNotifier = context.read<TtsNotifier>();
-                  if (ttsNotifier.chunks.isEmpty) {
-                    ttsNotifier.loadContent(notifier.ttsParagraphs);
+                  if (_loadTts()) {
+                    context.read<TtsNotifier>().jumpTo(paraIndex, sentIndex);
                   }
-                  ttsNotifier.jumpTo(paraIndex, sentIndex);
                 }
               }
           }
@@ -481,6 +474,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             await _controller.runJavaScript(_readerJs!);
 
             _isPageReady = true; // JS is now ready
+            if (_followOff) setState(() => _followOff = false);
             // Re-apply the TTS highlight: the new page starts without one,
             // and updates were skipped while it was loading.
             _lastHighlightKey = null;
@@ -517,6 +511,50 @@ class _ReaderScreenState extends State<ReaderScreen>
           },
         ),
       );
+  }
+
+  /// Load the current chapter into the TTS player if it isn't already, and
+  /// show the book/chapter on the lock screen. Returns false if the chapter
+  /// has nothing to read.
+  bool _loadTts() {
+    final tts = context.read<TtsNotifier>();
+    final reader = context.read<ReaderNotifier>();
+    if (tts.chunks.isEmpty) {
+      final paragraphs = reader.ttsParagraphs;
+      if (paragraphs.isEmpty) return false;
+      tts.loadContent(paragraphs);
+    }
+    context.read<VelumAudioHandler>().setMediaMetadata(
+      bookTitle: reader.currentBook?.Title ?? 'Unknown Book',
+      chapterTitle: reader.currentChapter?.Title ?? 'Unknown Chapter',
+    );
+    return true;
+  }
+
+  /// Play button: pause, resume, or start reading from what's on screen
+  /// (the last spoken sentence if it's still visible, else the first one).
+  Future<void> _onPlayPressed() async {
+    final tts = context.read<TtsNotifier>();
+    if (tts.isPlaying) return tts.pause();
+    if (tts.isPaused) return tts.play();
+    if (!_loadTts()) return;
+
+    final current = tts.currentChunk;
+    final top = (MediaQuery.of(context).padding.top + kToolbarHeight).round();
+    String start = '';
+    if (_isPageReady) {
+      try {
+        final result = await _controller.runJavaScriptReturningResult(
+          'window.ttsVisibleStart($top, ${current?.paragraphIndex ?? -1}, '
+          '${current?.sentenceIndex ?? -1})',
+        );
+        start = result.toString().replaceAll('"', '');
+      } catch (_) {}
+    }
+    final parts = start.split(':');
+    final para = int.tryParse(parts.first);
+    if (para == null) return tts.play();
+    return tts.jumpTo(para, parts.length > 1 ? int.tryParse(parts[1]) : null);
   }
 
   /// Update WebView TTS highlight based on current TTS state and mode
@@ -565,7 +603,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               builder: (context, ttsNotifier, _) {
                 return TtsFab(
                   ttsNotifier: ttsNotifier,
-                  readerNotifier: notifier,
+                  onPressed: _onPlayPressed,
                   showUI: showUI,
                   isOverlayOpen:
                       _showColorPicker || _showSearch || _showBookComplete,
@@ -679,7 +717,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                                     notifier.currentBook!.Chapters!.length,
                                 minHeight: 2,
                                 backgroundColor: readerTheme.textColor.withAlpha(20),
-                                valueColor: const AlwaysStoppedAnimation<Color>(_accentGreen),
+                                valueColor: const AlwaysStoppedAnimation<Color>(_accent),
                               ),
                             Padding(
                               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -789,6 +827,64 @@ class _ReaderScreenState extends State<ReaderScreen>
                         ),
                       ),
                     ),
+
+                    // "Back to reading": shown when the user has scrolled
+                    // away from the sentence being read aloud.
+                    if (_followOff && !_showSearch && !_showColorPicker)
+                      Consumer<TtsNotifier>(
+                        builder: (context, tts, _) {
+                          if (!tts.isPlaying && !tts.isPaused) {
+                            return const SizedBox.shrink();
+                          }
+                          return AnimatedPositioned(
+                            duration: const Duration(milliseconds: 200),
+                            bottom: showUI ? 98 : 24,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: Material(
+                                color: _accent,
+                                elevation: 3,
+                                borderRadius: BorderRadius.circular(20),
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () {
+                                    HapticFeedback.lightImpact();
+                                    _controller.runJavaScript(
+                                      'window.ttsFollowNow();',
+                                    );
+                                  },
+                                  child: const Padding(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 10,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.record_voice_over,
+                                          size: 16,
+                                          color: Colors.white,
+                                        ),
+                                        SizedBox(width: 8),
+                                        Text(
+                                          'Back to reading',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
                   ],
                 ),
               ),
@@ -957,7 +1053,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 onPressed: () => notifier.loadBook(widget.assetPath),
                 icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('Retry'),
-                style: FilledButton.styleFrom(backgroundColor: _accentGreen),
+                style: FilledButton.styleFrom(backgroundColor: _accent),
               ),
             ],
           ),
@@ -1220,8 +1316,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     /* TTS Highlighting Styles */
     .tts-highlight {
-      background-color: rgba(76, 175, 80, 0.25) !important;
-      box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.3);
+      background-color: rgba(91, 61, 227, 0.22) !important;
+      box-shadow: 0 0 0 2px rgba(91, 61, 227, 0.3);
     }
 
     /* Search highlight styles */

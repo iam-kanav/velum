@@ -11,7 +11,7 @@ class AppTheme {
       brightness: Brightness.light,
       scaffoldBackgroundColor: AppColors.lightSurface,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.accentGreen,
+        seedColor: AppColors.accent,
         brightness: Brightness.light,
         surface: AppColors.lightSurface,
         onSurface: AppColors.inkBlack,
@@ -32,7 +32,7 @@ class AppTheme {
       brightness: Brightness.dark,
       scaffoldBackgroundColor: AppColors.darkSurface,
       colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.accentGreen,
+        seedColor: AppColors.accent,
         brightness: Brightness.dark,
         surface: AppColors.darkSurface,
         onSurface: AppColors.starlight,

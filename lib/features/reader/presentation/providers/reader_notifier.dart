@@ -2,9 +2,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:epubx/epubx.dart';
 import 'package:flutter/foundation.dart';
-import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 
+import '../../data/services/chapter_processor.dart';
 import '../../data/services/epub_service.dart';
 import '../../../tts/data/models/tts_chunk.dart';
 import '../../../library/data/services/library_service.dart';
@@ -125,6 +125,7 @@ class ReaderNotifier extends ChangeNotifier {
 
   // Image lookup: path variants -> EPUB image file name. Data URLs are
   // encoded lazily per chapter instead of for every image when a book opens.
+  List<int>? Function(String imageName) _readImage = (_) => null;
   Map<String, String> _imageAliases = {};
   Map<String, String> _normalizedImageAliases = {};
   final Map<String, String> _imageDataUrls = {};
@@ -147,10 +148,10 @@ class ReaderNotifier extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _currentBook = await _epubService.parseEpub(assetPath);
-
-      // Extract and cache images
-      _extractImages();
+      final opened = await _epubService.parseEpub(assetPath);
+      _currentBook = opened.book;
+      _readImage = opened.readImage;
+      _indexImages(opened.imageNames);
 
       // Restore saved chapter position from LibraryService
       int savedIndex = 0;
@@ -202,13 +203,8 @@ class ReaderNotifier extends ChangeNotifier {
     return 0;
   }
 
-  void _extractImages() {
-    final images = _currentBook?.Content?.Images;
-    if (images == null) return;
-
-    for (final entry in images.entries) {
-      if (entry.value.Content == null) continue;
-      final fileName = entry.key;
+  void _indexImages(List<String> imageNames) {
+    for (final fileName in imageNames) {
       final parts = fileName.split('/');
       _imageAliases[fileName] = fileName;
       _imageAliases[parts.last] = fileName;
@@ -252,10 +248,12 @@ class ReaderNotifier extends ChangeNotifier {
         _normalizedImageAliases[src.split('/').last.toLowerCase()];
     if (fileName == null) return null;
 
-    return _imageDataUrls.putIfAbsent(fileName, () {
-      final bytes = _currentBook!.Content!.Images![fileName]!.Content!;
-      return 'data:${_getMimeTypeFromName(fileName)};base64,${base64Encode(bytes)}';
-    });
+    final cached = _imageDataUrls[fileName];
+    if (cached != null) return cached;
+    final bytes = _readImage(fileName);
+    if (bytes == null) return null;
+    return _imageDataUrls[fileName] =
+        'data:${_getMimeTypeFromName(fileName)};base64,${base64Encode(bytes)}';
   }
 
   bool _showUI = true;
@@ -328,134 +326,11 @@ class ReaderNotifier extends ChangeNotifier {
     }
   }
 
-  static const _blockSelector = 'p, div, h1, h2, h3, h4, h5, h6, li, blockquote';
-
-  /// Keep only block elements that contain no other matched block, so wrapper
-  /// divs aren't counted as separate paragraphs (which would make TTS speak and
-  /// highlight them as one giant chunk). Linear in elements × depth.
-  static List<dom.Element> _leafBlocks(dom.Element body) {
-    final elements = body.querySelectorAll(_blockSelector);
-    final matched = elements.toSet();
-    final hasBlockChild = <dom.Element>{};
-    for (final el in elements) {
-      for (var node = el.parent; node != null; node = node.parent) {
-        if (matched.contains(node) && !hasBlockChild.add(node)) break;
-      }
-    }
-    return elements.where((el) => !hasBlockChild.contains(el)).toList();
-  }
-
   /// Paragraphs and sentences of the current chapter, indexed exactly like
   /// the rendered page's data-para / data-sent attributes.
   List<TtsParagraph> get ttsParagraphs {
     getProcessedHtml();
     return _cachedParagraphs;
-  }
-
-  /// Wrap sentences in spans for sentence-level highlighting and collect the
-  /// matching TTS paragraphs in the same pass, so spoken sentences always line
-  /// up with the highlighted ones. Preserves inner tags (<i>, <b>, <a>, …).
-  (String, List<TtsParagraph>) _processForTts(String htmlContent) {
-    final body = html_parser.parse(htmlContent).body;
-    if (body == null) return (htmlContent, const []);
-
-    final paragraphs = <TtsParagraph>[];
-    for (final p in _leafBlocks(body)) {
-      final text = p.text.trim();
-      if (text.isEmpty) continue;
-      final paraIndex = paragraphs.length;
-
-      final sentences = _splitHtmlIntoSentences(p.innerHtml);
-      final spoken = <TtsSentence>[];
-      if (sentences.length > 1) {
-        final newInnerHtml = StringBuffer();
-        for (int sIdx = 0; sIdx < sentences.length; sIdx++) {
-          final sentence = sentences[sIdx];
-          if (sentence.trim().isEmpty) continue;
-          newInnerHtml.write(
-            '<span class="tts-sent" data-para="$paraIndex" data-sent="$sIdx">$sentence</span>',
-          );
-          if (sIdx < sentences.length - 1) newInnerHtml.write(' ');
-        }
-        p.innerHtml = newInnerHtml.toString();
-        // Read the sentences back from the parsed spans: that's exactly the
-        // text the page shows for each data-sent index.
-        final seen = <int>{};
-        for (final span in p.querySelectorAll('span.tts-sent')) {
-          final idx = int.tryParse(span.attributes['data-sent'] ?? '');
-          final spanText = span.text.trim();
-          if (idx != null && spanText.isNotEmpty && seen.add(idx)) {
-            spoken.add((index: idx, text: spanText));
-          }
-        }
-      }
-      p.attributes['data-para'] = paraIndex.toString();
-      p.classes.add('tts-para');
-      paragraphs.add(TtsParagraph(text, spoken));
-    }
-
-    return (body.innerHtml, paragraphs);
-  }
-
-  /// Split an HTML string into sentences, preserving inner tags (<i>, <b>, <a>, etc.).
-  /// Splits at sentence-ending punctuation ([.!?]) followed by whitespace,
-  /// but only when the punctuation is in text content (not inside an HTML tag).
-  List<String> _splitHtmlIntoSentences(String html) {
-    final sentences = <String>[];
-    final current = StringBuffer();
-    bool inTag = false;
-
-    int i = 0;
-    while (i < html.length) {
-      final char = html[i];
-
-      if (char == '<') {
-        inTag = true;
-        current.write(char);
-        i++;
-        continue;
-      }
-      if (char == '>') {
-        inTag = false;
-        current.write(char);
-        i++;
-        continue;
-      }
-
-      current.write(char);
-
-      // Check for sentence boundary: punctuation followed by whitespace, not inside a tag
-      if (!inTag && (char == '.' || char == '!' || char == '?')) {
-        if (i + 1 < html.length) {
-          final next = html[i + 1];
-          if (next == ' ' || next == '\n' || next == '\t' || next == '\r') {
-            // Sentence boundary found
-            sentences.add(current.toString());
-            current.clear();
-            // Skip the whitespace between sentences
-            i++;
-            while (i + 1 < html.length) {
-              final c = html[i + 1];
-              if (c == ' ' || c == '\n' || c == '\t' || c == '\r') {
-                i++;
-              } else {
-                break;
-              }
-            }
-            i++;
-            continue;
-          }
-        }
-      }
-
-      i++;
-    }
-
-    if (current.isNotEmpty) {
-      sentences.add(current.toString());
-    }
-
-    return sentences;
   }
 
   /// Get processed HTML with images replaced and sentences wrapped for TTS.
@@ -467,7 +342,8 @@ class ReaderNotifier extends ChangeNotifier {
       return _cachedProcessedHtml!;
     }
     _cachedChapterHtml = rawHtml;
-    final (html, paragraphs) = _processForTts(processHtmlWithImages(rawHtml));
+    final (html, paragraphs) =
+        ChapterProcessor.process(processHtmlWithImages(rawHtml));
     _cachedProcessedHtml = html;
     _cachedParagraphs = paragraphs;
     return html;

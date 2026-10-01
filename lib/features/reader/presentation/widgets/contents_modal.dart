@@ -2,8 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
 import '../providers/reader_notifier.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
-const Color _accentGreen = Color(0xFF4CAF50);
+const Color _accent = AppColors.accent;
 
 class ContentsModal extends StatefulWidget {
   const ContentsModal({super.key});
@@ -117,7 +118,7 @@ class _ContentsModalState extends State<ContentsModal> {
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(10),
-                    borderSide: const BorderSide(color: _accentGreen),
+                    borderSide: const BorderSide(color: _accent),
                   ),
                 ),
               ),
@@ -155,7 +156,7 @@ class _ContentsModalState extends State<ContentsModal> {
                               ),
                             ),
                             tileColor: isSelected
-                                ? _accentGreen.withAlpha(30)
+                                ? _accent.withAlpha(30)
                                 : null,
                             onTap: () {
                               notifier.jumpToChapter(chapter);

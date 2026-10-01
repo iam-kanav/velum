@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../settings/data/models/reader_settings.dart';
 import '../providers/reader_notifier.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
 class GlobalSearchOverlay extends StatefulWidget {
   final ReaderTheme readerTheme;
@@ -213,9 +214,8 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                                       TextSpan(
                                         text: result.matchedText,
                                         style: TextStyle(
-                                          backgroundColor: const Color(
-                                            0xFF4CAF50,
-                                          ).withAlpha((0.3 * 255).round()),
+                                          backgroundColor: AppColors.accent
+                                              .withAlpha((0.3 * 255).round()),
                                           color: widget.readerTheme.textColor,
                                           fontWeight: FontWeight.bold,
                                         ),

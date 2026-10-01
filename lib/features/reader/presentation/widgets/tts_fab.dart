@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../settings/data/models/reader_settings.dart';
-import '../providers/reader_notifier.dart';
+import '../../../tts/data/models/tts_settings.dart';
 import '../../../tts/presentation/providers/tts_notifier.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
 class TtsFab extends StatelessWidget {
   final TtsNotifier ttsNotifier;
-  final ReaderNotifier readerNotifier;
+
+  /// Play/pause. The reader decides where playback starts (what's on screen).
+  final VoidCallback onPressed;
   final bool showUI;
   final bool isOverlayOpen;
   final ReaderTheme readerTheme;
@@ -18,7 +21,7 @@ class TtsFab extends StatelessWidget {
   const TtsFab({
     super.key,
     required this.ttsNotifier,
-    required this.readerNotifier,
+    required this.onPressed,
     required this.showUI,
     required this.isOverlayOpen,
     required this.readerTheme,
@@ -27,7 +30,6 @@ class TtsFab extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const Color accentGreen = Color(0xFF4CAF50);
     // Don't show FAB if user is highlighting text or searching
     if (isOverlayOpen) {
       return const SizedBox.shrink();
@@ -52,27 +54,40 @@ class TtsFab extends StatelessWidget {
         children: [
           FloatingActionButton(
             heroTag: 'tts_fab',
-            backgroundColor: accentGreen,
+            backgroundColor: AppColors.accent,
             foregroundColor: Colors.white,
             elevation: 4,
-            onPressed: () async {
+            onPressed: () {
               HapticFeedback.lightImpact();
-              if (isPlaying) {
-                await ttsNotifier.pause();
-              } else if (ttsNotifier.chunks.isNotEmpty) {
-                // Content already loaded — just resume/play
-                await ttsNotifier.play();
-              } else {
-                // First time — load content then play
-                final paragraphs = readerNotifier.ttsParagraphs;
-                if (paragraphs.isNotEmpty) {
-                  ttsNotifier.loadContent(paragraphs);
-                  await ttsNotifier.play();
-                }
-              }
+              onPressed();
             },
             child: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
           ),
+          // Moon badge — top-left of FAB while a sleep timer is set
+          if (ttsNotifier.sleepTimer != SleepTimer.off)
+            Positioned(
+              top: -4,
+              left: -4,
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(40),
+                      blurRadius: 3,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.bedtime,
+                  size: 12,
+                  color: AppColors.accent,
+                ),
+              ),
+            ),
           // Percentage pill — bottom-right of FAB
           if (isSynthesizing)
             Positioned(
@@ -97,7 +112,7 @@ class TtsFab extends StatelessWidget {
                 child: Text(
                   '$percent%',
                   style: const TextStyle(
-                    color: accentGreen,
+                    color: AppColors.accent,
                     fontSize: 9,
                     fontWeight: FontWeight.w700,
                     height: 1.3,

@@ -17,7 +17,8 @@ class AppColors {
   static const Color ash = Color(0xFFA0A0A0); // Secondary Text
 
   // Accents (Elegant, editorial)
-  static const Color accentGreen = Color(0xFF4CAF50);
+  /// Brand accent: the violet from the app icon.
+  static const Color accent = Color(0xFF5B3DE3);
   static const Color warmGold = Color(0xFFD4AF37);
   static const Color sageGreen = Color(0xFF7C9A92);
 

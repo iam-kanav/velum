@@ -5,9 +5,10 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
 import 'package:velum/features/library/presentation/providers/library_notifier.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
 // App accent green matching the icon
-const Color _accentGreen = Color(0xFF4CAF50);
+const Color _accent = AppColors.accent;
 
 class OnboardingScreen extends StatefulWidget {
   const OnboardingScreen({super.key});
@@ -98,7 +99,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     height: 8,
                     decoration: BoxDecoration(
                       color: _currentPage == index
-                          ? _accentGreen
+                          ? _accent
                           : appTheme.textColor.withAlpha(60),
                       borderRadius: BorderRadius.circular(4),
                     ),
@@ -194,7 +195,7 @@ class _WelcomePage extends StatelessWidget {
             child: ElevatedButton(
               onPressed: onNext,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _accentGreen,
+                backgroundColor: _accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
@@ -232,10 +233,10 @@ class _FeatureItem extends StatelessWidget {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: _accentGreen.withAlpha(30),
+            color: _accent.withAlpha(30),
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(icon, color: _accentGreen, size: 22),
+          child: Icon(icon, color: _accent, size: 22),
         ),
         const SizedBox(width: 16),
         Expanded(
@@ -341,7 +342,7 @@ class _LibrarySetupPageState extends State<_LibrarySetupPage> {
           _buildOptionCard(
             appTheme: appTheme,
             icon: Icons.manage_search,
-            iconColor: Colors.green,
+            iconColor: _accent,
             title: 'Auto-Detect EPUBs',
             subtitle: 'Scan your device for all EPUB files',
             badge: 'Recommended',
@@ -356,7 +357,7 @@ class _LibrarySetupPageState extends State<_LibrarySetupPage> {
           _buildOptionCard(
             appTheme: appTheme,
             icon: Icons.file_open,
-            iconColor: _accentGreen,
+            iconColor: _accent,
             title: 'Select Files Manually',
             subtitle: 'Pick individual EPUB files',
             onTap: libraryNotifier.isScanning
@@ -393,13 +394,13 @@ class _LibrarySetupPageState extends State<_LibrarySetupPage> {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.green.withAlpha(20),
+                color: _accent.withAlpha(20),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.withAlpha(60)),
+                border: Border.all(color: _accent.withAlpha(60)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                  const Icon(Icons.check_circle, color: _accent, size: 20),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -449,9 +450,9 @@ class _LibrarySetupPageState extends State<_LibrarySetupPage> {
                   ? null
                   : widget.onNext,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _accentGreen,
+                backgroundColor: _accent,
                 foregroundColor: Colors.white,
-                disabledBackgroundColor: _accentGreen.withAlpha(100),
+                disabledBackgroundColor: _accent.withAlpha(100),
                 disabledForegroundColor: Colors.white.withAlpha(150),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
@@ -614,13 +615,13 @@ class _NotificationSetupPageState extends State<_NotificationSetupPage> {
             width: 100,
             height: 100,
             decoration: BoxDecoration(
-              color: _accentGreen.withAlpha(30),
+              color: _accent.withAlpha(30),
               shape: BoxShape.circle,
             ),
             child: Icon(
               Icons.notifications_active,
               size: 50,
-              color: _accentGreen,
+              color: _accent,
             ),
           ),
           const SizedBox(height: 32),
@@ -670,13 +671,13 @@ class _NotificationSetupPageState extends State<_NotificationSetupPage> {
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.green.withAlpha(20),
+                color: _accent.withAlpha(20),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.withAlpha(60)),
+                border: Border.all(color: _accent.withAlpha(60)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.check_circle, color: Colors.green, size: 20),
+                  const Icon(Icons.check_circle, color: _accent, size: 20),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -706,8 +707,8 @@ class _NotificationSetupPageState extends State<_NotificationSetupPage> {
                   ),
                 ),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: _accentGreen,
-                  side: BorderSide(color: _accentGreen.withAlpha(180)),
+                  foregroundColor: _accent,
+                  side: BorderSide(color: _accent.withAlpha(180)),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(14),
                   ),
@@ -725,7 +726,7 @@ class _NotificationSetupPageState extends State<_NotificationSetupPage> {
             child: ElevatedButton(
               onPressed: widget.onNext,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _accentGreen,
+                backgroundColor: _accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
@@ -822,7 +823,7 @@ class _ThemeSetupPage extends StatelessWidget {
             child: ElevatedButton(
               onPressed: onFinish,
               style: ElevatedButton.styleFrom(
-                backgroundColor: _accentGreen,
+                backgroundColor: _accent,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(16),
@@ -895,14 +896,14 @@ class _ThemeSection extends StatelessWidget {
                       shape: BoxShape.circle,
                       border: Border.all(
                         color: isSelected
-                            ? _accentGreen
+                            ? _accent
                             : Colors.grey.withAlpha(60),
                         width: isSelected ? 3 : 1,
                       ),
                       boxShadow: isSelected
                           ? [
                               BoxShadow(
-                                color: _accentGreen.withAlpha(60),
+                                color: _accent.withAlpha(60),
                                 blurRadius: 12,
                                 spreadRadius: 2,
                               ),

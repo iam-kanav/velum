@@ -1,5 +1,6 @@
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
 /// Describes a single step in the reader tutorial.
 class _TutorialStep {
@@ -52,7 +53,7 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
 
-  static const _accentGreen = Color(0xFF4CAF50);
+  static const _accent = AppColors.accent;
 
   static const List<_TutorialStep> _steps = [
     _TutorialStep(
@@ -264,12 +265,12 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
             color: const Color(0xFF1E1E1E),
             borderRadius: BorderRadius.circular(20),
             border: Border.all(
-              color: _accentGreen.withAlpha((0.3 * 255).round()),
+              color: _accent.withAlpha((0.3 * 255).round()),
               width: 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: _accentGreen.withAlpha((0.08 * 255).round()),
+                color: _accent.withAlpha((0.08 * 255).round()),
                 blurRadius: 30,
                 spreadRadius: 2,
               ),
@@ -283,9 +284,9 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
                 height: 64,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: _accentGreen.withAlpha((0.12 * 255).round()),
+                  color: _accent.withAlpha((0.12 * 255).round()),
                 ),
-                child: Icon(step.icon, size: 32, color: _accentGreen),
+                child: Icon(step.icon, size: 32, color: _accent),
               ),
               const SizedBox(height: 20),
               Text(
@@ -331,7 +332,7 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
               height: 8,
               decoration: BoxDecoration(
                 color: isActive
-                    ? _accentGreen
+                    ? _accent
                     : Colors.white.withAlpha((0.25 * 255).round()),
                 borderRadius: BorderRadius.circular(4),
               ),
@@ -357,7 +358,7 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
               FilledButton(
                 onPressed: _next,
                 style: FilledButton.styleFrom(
-                  backgroundColor: _accentGreen,
+                  backgroundColor: _accent,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 28,
@@ -427,7 +428,7 @@ class _SpotlightPainter extends CustomPainter {
       center!,
       radius,
       Paint()
-        ..color = const Color(0xFF4CAF50).withAlpha((0.35 * 255).round())
+        ..color = AppColors.accent.withAlpha((0.35 * 255).round())
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.5
         ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6),
@@ -438,7 +439,7 @@ class _SpotlightPainter extends CustomPainter {
       center!,
       radius,
       Paint()
-        ..color = const Color(0xFF4CAF50).withAlpha((0.6 * 255).round())
+        ..color = AppColors.accent.withAlpha((0.6 * 255).round())
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5,
     );

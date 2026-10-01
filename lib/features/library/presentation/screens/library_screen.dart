@@ -9,8 +9,9 @@ import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
 import 'package:velum/features/library/presentation/providers/library_notifier.dart';
 import 'package:velum/features/library/data/models/scanned_book.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
-const Color _accentGreen = Color(0xFF4CAF50);
+const Color _accent = AppColors.accent;
 
 class LibraryScreen extends StatefulWidget {
   const LibraryScreen({super.key});
@@ -164,7 +165,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       backgroundColor: theme.backgroundColor,
       body: RefreshIndicator(
         onRefresh: () => libraryNotifier.refresh(),
-        color: _accentGreen,
+        color: _accent,
         backgroundColor: theme.backgroundColor,
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -353,7 +354,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       floatingActionButton: !_selectionMode
           ? FloatingActionButton(
               onPressed: () => libraryNotifier.pickFiles(),
-              backgroundColor: _accentGreen,
+              backgroundColor: _accent,
               child: libraryNotifier.isScanning
                   ? const SizedBox(
                       width: 24,
@@ -384,10 +385,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
               width: 100,
               height: 100,
               decoration: BoxDecoration(
-                color: _accentGreen.withAlpha(20),
+                color: _accent.withAlpha(20),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.menu_book, size: 50, color: _accentGreen),
+              child: const Icon(Icons.menu_book, size: 50, color: _accent),
             ),
             const SizedBox(height: 24),
             Text(
@@ -417,7 +418,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ? null
                     : () => notifier.pickFiles(),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _accentGreen,
+                  backgroundColor: _accent,
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
@@ -488,11 +489,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
         decoration: BoxDecoration(
           color: _getCardColor(theme),
           borderRadius: BorderRadius.circular(16),
-          border: isSelected ? Border.all(color: _accentGreen, width: 3) : null,
+          border: isSelected ? Border.all(color: _accent, width: 3) : null,
           boxShadow: [
             BoxShadow(
               color: isSelected
-                  ? _accentGreen.withAlpha(40)
+                  ? _accent.withAlpha(40)
                   : Colors.black.withAlpha(15),
               blurRadius: isSelected ? 15 : 10,
               offset: const Offset(0, 4),
@@ -567,7 +568,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: _accentGreen,
+                    color: _accent,
                     shape: BoxShape.circle,
                     boxShadow: [
                       BoxShadow(
@@ -594,10 +595,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   width: 28,
                   height: 28,
                   decoration: BoxDecoration(
-                    color: isSelected ? _accentGreen : Colors.white,
+                    color: isSelected ? _accent : Colors.white,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: isSelected ? _accentGreen : Colors.grey,
+                      color: isSelected ? _accent : Colors.grey,
                       width: 2,
                     ),
                   ),

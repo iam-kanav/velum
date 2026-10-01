@@ -69,6 +69,17 @@ class TtsNotifier extends ChangeNotifier {
 
   Timer? _settingsDebounce;
 
+  // Sleep timer (not persisted: it applies to this listening session)
+  SleepTimer _sleepTimer = SleepTimer.off;
+  DateTime? _sleepEndsAt;
+  Timer? _sleepFire;
+  Timer? _sleepTick;
+
+  SleepTimer get sleepTimer => _sleepTimer;
+
+  /// Time left on a duration-based sleep timer.
+  Duration? get sleepRemaining => _sleepEndsAt?.difference(DateTime.now());
+
   TtsNotifier(this._device, this._edge, this._prefs);
 
   /// Initialize TTS and load saved settings
@@ -182,7 +193,11 @@ class TtsNotifier extends ChangeNotifier {
     // Finished all chunks in this chapter
     _state = TtsState.stopped;
     _currentChunkIndex = 0;
-    if (_settings.autoContinue) onChapterComplete?.call();
+    if (_sleepTimer == SleepTimer.endOfChapter) {
+      setSleepTimer(SleepTimer.off);
+    } else if (_settings.autoContinue) {
+      onChapterComplete?.call();
+    }
     _notify();
   }
 
@@ -297,6 +312,27 @@ class TtsNotifier extends ChangeNotifier {
     }
 
     await _engine.speak(_chunks[_currentChunkIndex].text);
+  }
+
+  /// Start (or cancel) the sleep timer. When it runs out playback pauses,
+  /// so the listener can pick up where they dozed off.
+  void setSleepTimer(SleepTimer timer) {
+    _sleepFire?.cancel();
+    _sleepTick?.cancel();
+    _sleepEndsAt = null;
+    _sleepTimer = timer;
+
+    final duration = timer.duration;
+    if (duration != null) {
+      _sleepEndsAt = DateTime.now().add(duration);
+      _sleepFire = Timer(duration, () {
+        setSleepTimer(SleepTimer.off);
+        if (isPlaying) pause();
+      });
+      // Refresh the "stops in N min" label
+      _sleepTick = Timer.periodic(const Duration(seconds: 30), (_) => _notify());
+    }
+    _notify();
   }
 
   // Settings
@@ -450,6 +486,8 @@ class TtsNotifier extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _settingsDebounce?.cancel();
+    _sleepFire?.cancel();
+    _sleepTick?.cancel();
     _audioInterruptionSub?.cancel();
     // Engines are shared app-wide and reused on the next Reader visit,
     // so only stop them and detach (unless another notifier took over).

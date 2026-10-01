@@ -107,29 +107,45 @@ document.body.addEventListener('click', function(e) {
 });
 
 // TTS highlight functions
-window.ttsHighlightParagraph = function(index) {
-  // Remove previous highlight
+// Following: the page scrolls to keep the spoken sentence in view, until the
+// user scrolls it out of view themselves. Flutter then shows "Back to reading";
+// following resumes when that's tapped or the sentence is back on screen.
+window._ttsFollow = true;
+var _lastTouch = 0;
+document.addEventListener('touchstart', function() { _lastTouch = Date.now(); }, { passive: true });
+document.addEventListener('touchmove', function() { _lastTouch = Date.now(); }, { passive: true });
+
+function inView(el) {
+  var r = el.getBoundingClientRect();
+  return r.bottom > 0 && r.top < window.innerHeight;
+}
+
+function setFollow(on) {
+  if (window._ttsFollow === on) return;
+  window._ttsFollow = on;
+  ReaderChannel.postMessage(on ? 'tts-follow:on' : 'tts-follow:off');
+}
+
+function showTts(el) {
   var prev = document.querySelector('.tts-highlight');
   if (prev) prev.classList.remove('tts-highlight');
-  
-  // Find paragraph by data-para attribute
-  var el = document.querySelector('[data-para="' + index + '"]');
-  if (el) {
-    el.classList.add('tts-highlight');
+  el.classList.add('tts-highlight');
+  if (window._ttsFollow) {
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  } else if (inView(el)) {
+    setFollow(true);
   }
+}
+
+window.ttsHighlightParagraph = function(index) {
+  var el = document.querySelector('.tts-para[data-para="' + index + '"]');
+  if (el) showTts(el);
 };
 
 window.ttsHighlightSentence = function(paraIndex, sentIndex) {
-  // Remove previous highlight
-  var prev = document.querySelector('.tts-highlight');
-  if (prev) prev.classList.remove('tts-highlight');
-  
-  // Find sentence by data-para and data-sent attributes
   var el = document.querySelector('[data-para="' + paraIndex + '"][data-sent="' + sentIndex + '"]');
   if (el) {
-    el.classList.add('tts-highlight');
-    el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    showTts(el);
   } else {
     // Fallback to paragraph highlight if no sentence span found
     window.ttsHighlightParagraph(paraIndex);
@@ -139,6 +155,40 @@ window.ttsHighlightSentence = function(paraIndex, sentIndex) {
 window.ttsClearHighlight = function() {
   var prev = document.querySelector('.tts-highlight');
   if (prev) prev.classList.remove('tts-highlight');
+  setFollow(true);
+};
+
+window.ttsFollowNow = function() {
+  setFollow(true);
+  var cur = document.querySelector('.tts-highlight');
+  if (cur) cur.scrollIntoView({ behavior: 'smooth', block: 'center' });
+};
+
+// Where Play should start: the preferred position if it's on screen,
+// otherwise the first sentence/paragraph visible below [top] (the app bar).
+// Returns "para:sent", "para", or "".
+window.ttsVisibleStart = function(top, prefPara, prefSent) {
+  var visible = function(el) {
+    var r = el.getBoundingClientRect();
+    return r.bottom > top && r.top < window.innerHeight;
+  };
+  if (prefPara >= 0) {
+    var pref = document.querySelector(prefSent >= 0
+      ? '[data-para="' + prefPara + '"][data-sent="' + prefSent + '"]'
+      : '.tts-para[data-para="' + prefPara + '"]');
+    if (pref && visible(pref)) return prefSent >= 0 ? prefPara + ':' + prefSent : '' + prefPara;
+  }
+  var paras = document.querySelectorAll('.tts-para');
+  for (var i = 0; i < paras.length; i++) {
+    if (!visible(paras[i])) continue;
+    var p = paras[i].getAttribute('data-para');
+    var sents = paras[i].querySelectorAll('[data-sent]');
+    for (var j = 0; j < sents.length; j++) {
+      if (visible(sents[j])) return p + ':' + sents[j].getAttribute('data-sent');
+    }
+    return p;
+  }
+  return '';
 };
 
 // Scroll listener to update Flutter state
@@ -147,6 +197,11 @@ window.addEventListener('scroll', function() {
   clearTimeout(scrollTimeout);
   scrollTimeout = setTimeout(function() {
     ReaderChannel.postMessage('scroll:' + window.scrollY);
+    // Only scrolls the user started (incl. their momentum) toggle following
+    if (Date.now() - _lastTouch < 3000) {
+      var cur = document.querySelector('.tts-highlight');
+      if (cur) setFollow(inView(cur));
+    }
   }, 200);
 });
 

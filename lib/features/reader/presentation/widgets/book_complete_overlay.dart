@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../settings/data/models/reader_settings.dart';
+import 'package:velum/core/theme/app_colors.dart';
 
 class BookCompleteOverlay extends StatelessWidget {
   final ReaderTheme readerTheme;
@@ -17,7 +18,6 @@ class BookCompleteOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const Color accentGreen = Color(0xFF4CAF50);
 
     return Container(
       color: readerTheme.backgroundColor.withAlpha((0.95 * 255).round()),
@@ -57,7 +57,7 @@ class BookCompleteOverlay extends StatelessWidget {
                 child: FilledButton(
                   onPressed: onBackToLibrary,
                   style: FilledButton.styleFrom(
-                    backgroundColor: accentGreen,
+                    backgroundColor: AppColors.accent,
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
