@@ -11,6 +11,8 @@ import '../widgets/reader_tutorial_overlay.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
 import 'package:velum/features/settings/presentation/widgets/settings_modal.dart';
+import 'package:velum/features/tts/data/models/tts_chunk.dart';
+import 'package:velum/features/tts/data/models/tts_settings.dart';
 import 'package:velum/features/tts/presentation/providers/tts_notifier.dart';
 import 'package:velum/features/tts/data/services/velum_audio_handler.dart';
 import 'package:velum/core/widgets/banner_ad_widget.dart';
@@ -31,6 +33,13 @@ import 'package:velum/features/reader/presentation/widgets/tts_fab.dart';
 import 'package:velum/core/theme/app_colors.dart';
 
 const Color _accent = AppColors.accent;
+
+/// Reader bottom bar (progress line + controls row).
+const double _barHeight = 82;
+
+/// "Hide ads" link (30) + banner (50). When ads are hidden the bottom bar
+/// grows by this much instead, so the layout looks the same either way.
+const double _adAreaHeight = 80;
 
 class ReaderScreen extends StatefulWidget {
   final String assetPath;
@@ -94,6 +103,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void initState() {
     super.initState();
+    _prefs = context.read<SharedPreferences>();
     _initController();
     _checkTutorialFlag();
     WidgetsBinding.instance.addObserver(this);
@@ -109,6 +119,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _loadChapterPositions();
       _readerNotifier = context.read<ReaderNotifier>();
       _readerNotifier!.addListener(_onReaderChanged);
       _readerNotifier!.loadBook(widget.assetPath);
@@ -132,6 +143,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
         // Attempt to advance — nextChapter() is a no-op on the last chapter.
         final chapterBefore = readerNotifier.currentChapter;
+        // Listening carries on into the next chapter from its beginning.
+        _chapterPositions.remove(readerNotifier.currentChapterIndex + 1);
         readerNotifier.nextChapter();
         final chapterAfter = readerNotifier.currentChapter;
 
@@ -157,6 +170,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   void dispose() {
     // Save reading position when exiting
     _readerNotifier?.saveReadingPosition(_savedScrollPosition);
+    if (_shownChapter != null) _rememberChapter(_shownChapterIndex);
 
     WidgetsBinding.instance.removeObserver(this);
     _readerNotifier?.removeListener(_onReaderChanged);
@@ -171,15 +185,77 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Object? _shownChapter;
+  int _shownChapterIndex = 0;
+
+  /// Where the reader was in each chapter of this book: scroll offset and
+  /// the last read-aloud sentence, so returning to a chapter (swipe, contents)
+  /// picks up exactly there. Persisted per book.
+  final Map<int, ({double scroll, int? para, int? sent})> _chapterPositions = {};
+  double? _pendingBookmarkScroll;
+  late final SharedPreferences _prefs;
+
+  String get _chapterPositionsKey =>
+      'chapter_positions_${widget.assetPath.hashCode}';
+
+  void _loadChapterPositions() {
+    final raw = _prefs.getString(_chapterPositionsKey);
+    if (raw == null) return;
+    try {
+      (jsonDecode(raw) as Map<String, dynamic>).forEach((k, v) {
+        final l = v as List<dynamic>;
+        _chapterPositions[int.parse(k)] = (
+          scroll: (l[0] as num).toDouble(),
+          para: l[1] as int?,
+          sent: l[2] as int?,
+        );
+      });
+    } catch (_) {}
+  }
+
+  void _saveChapterPositions() {
+    _prefs.setString(
+      _chapterPositionsKey,
+      jsonEncode({
+        for (final e in _chapterPositions.entries)
+          '${e.key}': [e.value.scroll, e.value.para, e.value.sent],
+      }),
+    );
+  }
+
+  /// Remember the chapter being left: scroll offset and read-aloud position.
+  void _rememberChapter(int index) {
+    final chunk = _ttsNotifier?.currentChunk;
+    final hasTts = (_ttsNotifier?.chunks.isNotEmpty ?? false) &&
+        _ttsNotifier!.state != TtsState.idle;
+    final previous = _chapterPositions[index];
+    _chapterPositions[index] = (
+      scroll: _savedScrollPosition,
+      para: hasTts ? chunk?.paragraphIndex : previous?.para,
+      sent: hasTts ? chunk?.sentenceIndex : previous?.sent,
+    );
+    _saveChapterPositions();
+  }
+  bool? _lastShowUI;
+
+  /// When the bars hide, the Play button slides down onto where the settings
+  /// gear was; taps landing during that move were meant for the gear.
+  DateTime _fabMovedAt = DateTime(0);
 
   /// Read-aloud belongs to the chapter it was started in, so any chapter
   /// change (swipe, contents, search, highlights, bookmarks, start over)
   /// stops it. Otherwise the old chapter's positions get highlighted on the
   /// new page. Auto-continue reloads and restarts it after the change.
   void _onReaderChanged() {
+    final showUI = _readerNotifier?.showUI;
+    if (showUI != _lastShowUI) {
+      _lastShowUI = showUI;
+      _fabMovedAt = DateTime.now();
+    }
     final chapter = _readerNotifier?.currentChapter;
     if (identical(chapter, _shownChapter)) return;
+    if (_shownChapter != null) _rememberChapter(_shownChapterIndex);
     _shownChapter = chapter;
+    _shownChapterIndex = _readerNotifier?.currentChapterIndex ?? 0;
     final tts = _ttsNotifier;
     if (tts != null && tts.chunks.isNotEmpty) {
       tts.stop();
@@ -534,12 +610,25 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Play button: pause, resume, or start reading from what's on screen
   /// (the last spoken sentence if it's still visible, else the first one).
   Future<void> _onPlayPressed() async {
+    if (DateTime.now().difference(_fabMovedAt).inMilliseconds < 500) return;
     final tts = context.read<TtsNotifier>();
     if (tts.isPlaying) return tts.pause();
     if (tts.isPaused) return tts.play();
+    final wasLoaded = tts.chunks.isNotEmpty;
     if (!_loadTts()) return;
 
-    final current = tts.currentChunk;
+    // Prefer the sentence last read here: the current one, or the one this
+    // chapter was left on.
+    final remembered = _chapterPositions[_shownChapterIndex];
+    final current = wasLoaded
+        ? tts.currentChunk
+        : (remembered?.para == null
+            ? null
+            : TtsChunk(
+                text: '',
+                paragraphIndex: remembered!.para!,
+                sentenceIndex: remembered.sent,
+              ));
     final top = (MediaQuery.of(context).padding.top + kToolbarHeight).round();
     String start = '';
     if (_isPageReady) {
@@ -588,6 +677,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     final notifier = context.watch<ReaderNotifier>();
     // Force UI visible during tutorial so spotlight positions are correct
     final showUI = _showTutorial ? true : notifier.showUI;
+    final adShown = context.select<AdNotifier, bool>((a) => a.showBanner);
+    // Without the ad, the bar takes over its space so nothing moves.
+    final barHeight = _barHeight + (adShown ? 0 : _adAreaHeight);
     final settings = context.watch<SettingsNotifier>().settings;
     final readerTheme = settings.readerTheme;
 
@@ -604,7 +696,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                 return TtsFab(
                   ttsNotifier: ttsNotifier,
                   onPressed: _onPlayPressed,
-                  showUI: showUI,
+                  // Sit right on top of the bar (or the ad area when the bar
+                  // is hidden). Scaffold already adds the system inset + 16.
+                  bottomMargin: showUI
+                      ? _barHeight + _adAreaHeight - 16
+                      : _adAreaHeight - 16,
                   isOverlayOpen:
                       _showColorPicker || _showSearch || _showBookComplete,
                   readerTheme: readerTheme,
@@ -698,16 +794,17 @@ class _ReaderScreenState extends State<ReaderScreen>
                     // Layer 3: Bottom Bar (Animated) - Uses Reader Theme
                     AnimatedPositioned(
                       duration: const Duration(milliseconds: 200),
-                      bottom: showUI ? 0 : -82,
+                      bottom: showUI ? 0 : -barHeight,
                       left: 0,
                       right: 0,
-                      height: 82,
+                      height: barHeight,
                       child: Container(
-                        color: readerTheme.backgroundColor.withAlpha(
-                          (0.95 * 255).round(),
-                        ),
+                        // Solid, like the ad area it replaces when ads are off,
+                        // so page text never shows through the empty space.
+                        color: readerTheme.backgroundColor,
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
+                          mainAxisAlignment: MainAxisAlignment.start,
                           children: [
                             // Reading progress bar
                             if (notifier.currentBook?.Chapters != null &&
@@ -888,16 +985,16 @@ class _ReaderScreenState extends State<ReaderScreen>
                   ],
                 ),
               ),
-              Consumer<AdNotifier>(
-                builder: (context, adNotifier, _) {
-                  if (!adNotifier.showBanner) return const SizedBox.shrink();
-                  return Column(
-                    mainAxisSize: MainAxisSize.min,
+              if (adShown)
+                SizedBox(
+                  height: _adAreaHeight,
+                  child: Column(
                     children: [
-                      GestureDetector(
-                        onTap: () => _showRemoveAdsDialog(readerTheme),
-                        child: Padding(
-                          padding: const EdgeInsets.only(top: 6, bottom: 4),
+                      SizedBox(
+                        height: _adAreaHeight - 50,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => _showRemoveAdsDialog(readerTheme),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -923,9 +1020,10 @@ class _ReaderScreenState extends State<ReaderScreen>
                       ),
                       const BannerAdWidget(),
                     ],
-                  );
-                },
-              ),
+                  ),
+                ),
+              // Keep the bar and ad clear of the system gesture/nav bar.
+              SizedBox(height: MediaQuery.of(context).padding.bottom),
             ],
           ),
 
@@ -1115,8 +1213,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       _controller.runJavaScript('window.scrollTo(0, $safeScroll);');
     } else {
       // Jump to the chapter, then scroll after page loads
-      _savedScrollPosition = bookmark.scrollPosition;
-      _shouldRestoreScroll = true;
+      _pendingBookmarkScroll = bookmark.scrollPosition;
       if (bookmark.chapterIndex < chapters.length) {
         notifier.jumpToChapter(chapters[bookmark.chapterIndex]);
       }
@@ -1319,6 +1416,11 @@ class _ReaderScreenState extends State<ReaderScreen>
       background-color: rgba(91, 61, 227, 0.22) !important;
       box-shadow: 0 0 0 2px rgba(91, 61, 227, 0.3);
     }
+    /* A sentence crossing formatting is several spans; an outline on each
+       would show seams between them. */
+    .tts-sent.tts-highlight {
+      box-shadow: none;
+    }
 
     /* Search highlight styles */
     .search-match {
@@ -1399,9 +1501,17 @@ class _ReaderScreenState extends State<ReaderScreen>
       }
       _isInitialLoad = false;
     } else {
-      // Regular navigation - start at top
-      _shouldRestoreScroll = false;
-      _savedScrollPosition = 0;
+      // Navigation: a bookmark's spot, else where the reader left this
+      // chapter, else the top. Search/highlight jumps scroll on their own.
+      final remembered =
+          _chapterPositions[context.read<ReaderNotifier>().currentChapterIndex];
+      final target = _pendingBookmarkScroll ??
+          (_pendingScrollPercent == null && _pendingScrollHighlightId == null
+              ? remembered?.scroll
+              : null);
+      _pendingBookmarkScroll = null;
+      _savedScrollPosition = target ?? 0;
+      _shouldRestoreScroll = _savedScrollPosition > 0;
     }
 
     _isPageReady = false;

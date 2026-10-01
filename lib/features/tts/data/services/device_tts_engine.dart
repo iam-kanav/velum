@@ -172,8 +172,12 @@ class DeviceTtsEngine extends TtsEngine {
     await _tts.stop();
   }
 
-  /// Device engines can't reliably pause mid-sentence, so pausing stops and
-  /// resuming re-speaks the current chunk.
+  /// Pause mid-utterance. Speaking the same text again continues from the
+  /// word where it paused (flutter_tts tracks the position on Android 8+;
+  /// older versions restart the chunk).
   @override
-  Future<void> pause() => stop();
+  Future<void> pause() async {
+    _awaitingCompletion = false;
+    await _tts.pause();
+  }
 }

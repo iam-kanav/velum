@@ -2,9 +2,14 @@ import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import '../../../tts/data/models/tts_chunk.dart';
 
-/// Prepares chapter HTML for read-aloud: wraps each sentence in a span and
+/// Prepares chapter HTML for read-aloud: marks each sentence on the page and
 /// returns the matching spoken text, built in the same pass so the voice and
 /// the highlight always refer to the same sentence.
+///
+/// Sentences are marked by splitting text nodes, never by cutting HTML apart,
+/// so markup is untouched and spans can never nest. A sentence that crosses
+/// inline formatting (`Mr. <i>Darcy. He</i> left.`) gets one span per piece,
+/// all sharing the same data-sent index.
 class ChapterProcessor {
   const ChapterProcessor._();
 
@@ -27,30 +32,7 @@ class ChapterProcessor {
       if (text.isEmpty) continue;
       final paraIndex = paragraphs.length;
 
-      final sentences = splitHtmlIntoSentences(p.innerHtml);
-      final spoken = <TtsSentence>[];
-      if (sentences.length > 1) {
-        final newInnerHtml = StringBuffer();
-        for (int sIdx = 0; sIdx < sentences.length; sIdx++) {
-          final sentence = sentences[sIdx];
-          if (sentence.trim().isEmpty) continue;
-          newInnerHtml.write(
-            '<span class="tts-sent" data-para="$paraIndex" data-sent="$sIdx">$sentence</span>',
-          );
-          if (sIdx < sentences.length - 1) newInnerHtml.write(' ');
-        }
-        p.innerHtml = newInnerHtml.toString();
-        // Read the sentences back from the parsed spans: that's exactly the
-        // text the page shows for each data-sent index.
-        final seen = <int>{};
-        for (final span in p.querySelectorAll('span.tts-sent')) {
-          final idx = int.tryParse(span.attributes['data-sent'] ?? '');
-          final spanText = span.text.trim();
-          if (idx != null && spanText.isNotEmpty && seen.add(idx)) {
-            spoken.add((index: idx, text: spanText));
-          }
-        }
-      }
+      final spoken = _wrapSentences(p, paraIndex);
       p.attributes['data-para'] = paraIndex.toString();
       p.classes.add('tts-para');
       paragraphs.add(TtsParagraph(text, spoken));
@@ -120,6 +102,71 @@ class ChapterProcessor {
     }
   }
 
+  /// Mark the sentences of block [p] and return their spoken text. Returns an
+  /// empty list (and changes nothing) when [p] holds a single sentence.
+  static List<TtsSentence> _wrapSentences(dom.Element p, int paraIndex) {
+    final texts = <dom.Text>[];
+    void collect(dom.Node node) {
+      for (final child in node.nodes) {
+        if (child is dom.Text) {
+          texts.add(child);
+        } else if (child is dom.Element &&
+            child.localName != 'script' &&
+            child.localName != 'style') {
+          collect(child);
+        }
+      }
+    }
+
+    collect(p);
+    final plain = texts.map((t) => t.data).join();
+    final ranges = sentenceRanges(plain);
+    if (ranges.length < 2) return const [];
+
+    // Split each text node at sentence edges and wrap the in-sentence pieces.
+    var offset = 0;
+    for (final node in texts) {
+      final start = offset;
+      final end = start + node.data.length;
+      offset = end;
+
+      final pieces = <dom.Node>[];
+      var pos = start;
+      for (var s = 0; s < ranges.length && pos < end; s++) {
+        final (rs, re) = ranges[s];
+        if (re <= pos || rs >= end) continue;
+        final a = rs > pos ? rs : pos;
+        final b = re < end ? re : end;
+        if (a > pos) pieces.add(dom.Text(plain.substring(pos, a)));
+        final piece = plain.substring(a, b);
+        if (piece.trim().isEmpty) {
+          pieces.add(dom.Text(piece));
+        } else {
+          pieces.add(
+            dom.Element.tag('span')
+              ..classes.add('tts-sent')
+              ..attributes['data-para'] = '$paraIndex'
+              ..attributes['data-sent'] = '$s'
+              ..append(dom.Text(piece)),
+          );
+        }
+        pos = b;
+      }
+      if (pos < end) pieces.add(dom.Text(plain.substring(pos, end)));
+
+      final parent = node.parentNode!;
+      for (final piece in pieces) {
+        parent.insertBefore(piece, node);
+      }
+      node.remove();
+    }
+
+    return [
+      for (var s = 0; s < ranges.length; s++)
+        (index: s, text: plain.substring(ranges[s].$1, ranges[s].$2).trim()),
+    ];
+  }
+
   static const _closers = {'"', "'", '”', '’', ')', ']'};
   static const _abbreviations = {
     'mr', 'mrs', 'ms', 'dr', 'st', 'jr', 'sr', 'prof', 'mt', 'vs', 'etc',
@@ -128,66 +175,59 @@ class ChapterProcessor {
   static final _letter = RegExp(r'[A-Za-z]');
 
   static bool _isSpace(String c) =>
-      c == ' ' || c == '\n' || c == '\t' || c == '\r';
+      c == ' ' || c == '\n' || c == '\t' || c == '\r' || c == '\u00A0';
 
-  /// Split an HTML string into sentences, preserving inner tags.
-  /// A sentence ends at . ! or ? (plus any closing quotes, brackets or tags)
-  /// followed by whitespace, outside of tags and not after a common
+  /// Sentence spans of plain [text] as [start, end) offsets, excluding the
+  /// whitespace between sentences. A sentence ends at . ! or ? (plus any
+  /// closing quotes/brackets) followed by whitespace, except after a common
   /// abbreviation.
-  static List<String> splitHtmlIntoSentences(String html) {
-    final sentences = <String>[];
-    final current = StringBuffer();
-    bool inTag = false;
-
-    int i = 0;
-    while (i < html.length) {
-      final char = html[i];
-      current.write(char);
-
-      if (char == '<') {
-        inTag = true;
-      } else if (char == '>') {
-        inTag = false;
-      } else if (!inTag &&
-          (char == '.' || char == '!' || char == '?') &&
-          !(char == '.' && _followsAbbreviation(html, i))) {
-        // Keep closing quotes/brackets and closing tags (e.g. `.</i>`) with
-        // the sentence they end.
+  static List<(int, int)> sentenceRanges(String text) {
+    final ranges = <(int, int)>[];
+    var i = 0;
+    while (i < text.length && _isSpace(text[i])) {
+      i++;
+    }
+    var start = i;
+    while (i < text.length) {
+      final char = text[i];
+      if ((char == '.' || char == '!' || char == '?') &&
+          !(char == '.' && _followsAbbreviation(text, i))) {
         var end = i + 1;
-        while (end < html.length) {
-          if (_closers.contains(html[end])) {
-            end++;
-          } else if (html.startsWith('</', end) && html.indexOf('>', end) != -1) {
-            end = html.indexOf('>', end) + 1;
-          } else {
-            break;
-          }
+        while (end < text.length && _closers.contains(text[end])) {
+          end++;
         }
-        if (end < html.length && _isSpace(html[end])) {
-          current.write(html.substring(i + 1, end));
-          sentences.add(current.toString());
-          current.clear();
+        if (end < text.length && _isSpace(text[end])) {
+          ranges.add((start, end));
           i = end;
-          while (i < html.length && _isSpace(html[i])) {
+          while (i < text.length && _isSpace(text[i])) {
             i++;
           }
+          start = i;
           continue;
         }
       }
       i++;
     }
-
-    if (current.isNotEmpty) sentences.add(current.toString());
-    return sentences;
+    var end = text.length;
+    while (end > start && _isSpace(text[end - 1])) {
+      end--;
+    }
+    if (end > start) ranges.add((start, end));
+    return ranges;
   }
 
+  /// Plain-text sentences of [text] (used by tests and callers that only
+  /// need the split, not the page markup).
+  static List<String> splitIntoSentences(String text) =>
+      [for (final (a, b) in sentenceRanges(text)) text.substring(a, b)];
+
   /// True when the '.' at [dot] ends a word like "Mr" or "etc".
-  static bool _followsAbbreviation(String html, int dot) {
+  static bool _followsAbbreviation(String text, int dot) {
     var start = dot;
-    while (start > 0 && _letter.hasMatch(html[start - 1])) {
+    while (start > 0 && _letter.hasMatch(text[start - 1])) {
       start--;
     }
     if (start == dot) return false;
-    return _abbreviations.contains(html.substring(start, dot).toLowerCase());
+    return _abbreviations.contains(text.substring(start, dot).toLowerCase());
   }
 }

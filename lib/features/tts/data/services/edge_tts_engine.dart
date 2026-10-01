@@ -145,9 +145,14 @@ class EdgeTtsEngine extends TtsEngine {
 
   @override
   Future<void> applySettings(TtsSettings settings) async {
-    // speechRate (0.0–1.0, default 0.5) → '+0%' at 0.5, '+100%' at 1.0, '-80%' at 0.1
-    final ratePercent = ((settings.speechRate / 0.5) - 1) * 100;
+    // speechRate is stored with 0.5 = 1x. Edge caps synthesis at 2x ('+100%')
+    // and silently ignores anything faster, so synthesise at up to 2x and
+    // speed up playback (pitch-preserving) for the rest, up to 4x.
+    final speed = settings.speechRate * 2;
+    final synthSpeed = speed.clamp(0.1, 2.0);
+    final ratePercent = (synthSpeed - 1) * 100;
     _rate = '${ratePercent >= 0 ? '+' : ''}${ratePercent.round()}%';
+    await _player.setSpeed(speed / synthSpeed);
 
     // pitch (0.5–2.0, default 1.0) → '+0Hz' at 1.0, '-50Hz' at 0.5, '+100Hz' at 2.0
     final pitchHz = (settings.pitch - 1.0) * 100;

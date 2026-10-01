@@ -10,7 +10,8 @@ class TtsFab extends StatelessWidget {
 
   /// Play/pause. The reader decides where playback starts (what's on screen).
   final VoidCallback onPressed;
-  final bool showUI;
+  /// Distance above the Scaffold's default FAB position.
+  final double bottomMargin;
   final bool isOverlayOpen;
   final ReaderTheme readerTheme;
 
@@ -22,7 +23,7 @@ class TtsFab extends StatelessWidget {
     super.key,
     required this.ttsNotifier,
     required this.onPressed,
-    required this.showUI,
+    required this.bottomMargin,
     required this.isOverlayOpen,
     required this.readerTheme,
     this.spotlightKey,
@@ -46,7 +47,7 @@ class TtsFab extends StatelessWidget {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 250),
       curve: Curves.easeOut,
-      margin: EdgeInsets.only(bottom: showUI ? 120.0 : 40.0),
+      margin: EdgeInsets.only(bottom: bottomMargin),
       child: Stack(
         key: spotlightKey,
         clipBehavior: Clip.none,

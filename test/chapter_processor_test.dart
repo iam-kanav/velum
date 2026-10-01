@@ -10,22 +10,36 @@ List<TtsParagraph> processAndCheck(String html) {
   final (output, paragraphs) = ChapterProcessor.process(html);
   final body = html_parser.parse(output).body!;
 
+  expect(
+    body.querySelectorAll('.tts-sent .tts-sent'),
+    isEmpty,
+    reason: 'sentence spans must never nest (nested spans make text be read twice)',
+  );
+
   final paraEls = body.querySelectorAll('.tts-para');
   expect(paraEls.length, paragraphs.length, reason: 'one element per paragraph');
+
+  String norm(String t) => t.replaceAll(RegExp(r'\s+'), ' ').trim();
 
   for (var i = 0; i < paragraphs.length; i++) {
     final el = paraEls[i];
     expect(el.attributes['data-para'], '$i');
     expect(el.text.trim(), paragraphs[i].text);
 
-    final spans = el.querySelectorAll('[data-sent]');
-    expect(spans.length, paragraphs[i].sentences.length);
-    for (final s in paragraphs[i].sentences) {
-      final span = el.querySelector('[data-sent="${s.index}"]');
-      expect(span, isNotNull, reason: 'span for sentence ${s.index}');
-      expect(span!.attributes['data-para'], '$i');
-      expect(span.text.trim(), s.text);
+    final sentences = paragraphs[i].sentences;
+    if (sentences.isEmpty) {
+      expect(el.querySelectorAll('[data-sent]'), isEmpty);
+      continue;
     }
+    // Every sentence's pieces on the page spell exactly its spoken text.
+    for (final s in sentences) {
+      final pieces = el.querySelectorAll('[data-sent="${s.index}"]');
+      expect(pieces, isNotEmpty, reason: 'spans for sentence ${s.index}');
+      expect(pieces.every((p) => p.attributes['data-para'] == '$i'), isTrue);
+      expect(norm(pieces.map((p) => p.text).join()), norm(s.text));
+    }
+    // The sentences together are the paragraph: nothing missing, nothing twice.
+    expect(norm(sentences.map((s) => s.text).join(' ')), norm(paragraphs[i].text));
   }
   return paragraphs;
 }
@@ -55,6 +69,26 @@ void main() {
         'One thing.',
         'Another thing.',
         'A third thing.',
+      ]);
+    });
+
+    test('a sentence break inside formatting is not read twice', () {
+      // Real case from Pride and Prejudice that made the voice read the whole
+      // paragraph and then repeat part of it.
+      final paras = processAndCheck(
+        '<p class="r">\u201C<span class="smcap">Edw. Gardiner</span>.\u201D<br/></p>',
+      );
+      expect(sentenceTexts(paras.single), ['\u201CEdw.', 'Gardiner.\u201D']);
+    });
+
+    test('a sentence crossing formatting is marked in several pieces', () {
+      final paras = processAndCheck(
+        '<p>He said <i>no. Then he</i> left quietly. Done.</p>',
+      );
+      expect(sentenceTexts(paras.single), [
+        'He said no.',
+        'Then he left quietly.',
+        'Done.',
       ]);
     });
 

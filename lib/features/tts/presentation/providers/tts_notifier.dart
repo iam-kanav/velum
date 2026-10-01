@@ -94,18 +94,46 @@ class TtsNotifier extends ChangeNotifier {
     _isInitialized = true;
     _notify();
 
-    // Audio focus handling - stop TTS when other audio plays
+    // Audio focus handling. Notification sounds only ask other audio to duck,
+    // so they must not pause reading (the default speech config turns ducks
+    // into pauses, hence androidWillPauseWhenDucked: false).
     try {
       _audioSession = await AudioSession.instance;
-      await _audioSession!.configure(const AudioSessionConfiguration.speech());
+      await _audioSession!.configure(
+        const AudioSessionConfiguration.speech().copyWith(
+          androidWillPauseWhenDucked: false,
+        ),
+      );
       _audioInterruptionSub =
-          _audioSession!.interruptionEventStream.listen((event) {
-        if (event.begin && _settings.stopOnAudioFocusLoss && isPlaying) {
-          stop();
-        }
-      });
+          _audioSession!.interruptionEventStream.listen(_onInterruption);
     } catch (e) {
       debugPrint('Audio session setup failed: $e');
+    }
+  }
+
+  /// True while playback is paused because of a temporary interruption
+  /// (a call, a voice assistant), so it resumes by itself afterwards.
+  bool _pausedByInterruption = false;
+
+  void _onInterruption(AudioInterruptionEvent event) {
+    if (!_settings.stopOnAudioFocusLoss) return;
+    if (event.begin) {
+      switch (event.type) {
+        case AudioInterruptionType.duck:
+          break; // notification sound: keep reading
+        case AudioInterruptionType.pause:
+          if (isPlaying) {
+            pause();
+            _pausedByInterruption = true;
+          }
+        case AudioInterruptionType.unknown:
+          // Another app took over audio for good (e.g. music started):
+          // pause, and let the user resume from the same word.
+          if (isPlaying) pause();
+      }
+    } else if (_pausedByInterruption) {
+      _pausedByInterruption = false;
+      if (isPaused) play();
     }
   }
 
@@ -242,6 +270,7 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Start or resume playback
   Future<void> play() async {
+    _pausedByInterruption = false;
     if (_chunks.isEmpty) return;
     final wasPaused = _state == TtsState.paused;
 
@@ -257,6 +286,8 @@ class TtsNotifier extends ChangeNotifier {
   }
 
   Future<void> pause() async {
+    // A manual pause (or one from the timer) shouldn't auto-resume later.
+    _pausedByInterruption = false;
     _state = TtsState.paused;
     _notify();
     await _engine.pause();
@@ -264,6 +295,7 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Stop playback (preserves position so play picks up where we left off)
   Future<void> stop() async {
+    _pausedByInterruption = false;
     _state = TtsState.stopped;
     _notify();
     await _engine.stop();
@@ -422,6 +454,8 @@ class TtsNotifier extends ChangeNotifier {
   }
 
   Future<void> updateHighlightMode(TtsHighlightMode mode) async {
+    // Re-selecting the current mode must not restart the paragraph.
+    if (mode == _settings.highlightMode) return;
     _settings = _settings.copyWith(highlightMode: mode);
     await _saveSettings();
 

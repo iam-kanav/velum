@@ -126,10 +126,17 @@ function setFollow(on) {
   ReaderChannel.postMessage(on ? 'tts-follow:on' : 'tts-follow:off');
 }
 
-function showTts(el) {
-  var prev = document.querySelector('.tts-highlight');
-  if (prev) prev.classList.remove('tts-highlight');
-  el.classList.add('tts-highlight');
+function clearTts() {
+  var prev = document.querySelectorAll('.tts-highlight');
+  for (var i = 0; i < prev.length; i++) prev[i].classList.remove('tts-highlight');
+}
+
+// [els] are the pieces of one sentence (several when it crosses formatting),
+// or a single paragraph.
+function showTts(els) {
+  clearTts();
+  for (var i = 0; i < els.length; i++) els[i].classList.add('tts-highlight');
+  var el = els[0];
   if (window._ttsFollow) {
     el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   } else if (inView(el)) {
@@ -139,13 +146,13 @@ function showTts(el) {
 
 window.ttsHighlightParagraph = function(index) {
   var el = document.querySelector('.tts-para[data-para="' + index + '"]');
-  if (el) showTts(el);
+  if (el) showTts([el]);
 };
 
 window.ttsHighlightSentence = function(paraIndex, sentIndex) {
-  var el = document.querySelector('[data-para="' + paraIndex + '"][data-sent="' + sentIndex + '"]');
-  if (el) {
-    showTts(el);
+  var els = document.querySelectorAll('[data-para="' + paraIndex + '"][data-sent="' + sentIndex + '"]');
+  if (els.length) {
+    showTts(els);
   } else {
     // Fallback to paragraph highlight if no sentence span found
     window.ttsHighlightParagraph(paraIndex);
@@ -153,8 +160,7 @@ window.ttsHighlightSentence = function(paraIndex, sentIndex) {
 };
 
 window.ttsClearHighlight = function() {
-  var prev = document.querySelector('.tts-highlight');
-  if (prev) prev.classList.remove('tts-highlight');
+  clearTts();
   setFollow(true);
 };
 

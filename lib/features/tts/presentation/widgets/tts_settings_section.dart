@@ -319,12 +319,14 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
 
           const SizedBox(height: 20),
 
-          // Speech Rate Slider
+          // Speech Rate: slider in 0.1x steps from 0.2x to 4x.
+          // speechRate is stored with 0.5 = normal, so x = speechRate * 2.
           _buildSlider(
             label: 'Speed',
             value: settings.speechRate,
             min: 0.1,
-            max: 1.0,
+            max: 2.0,
+            divisions: 38,
             displayValue: '${(settings.speechRate * 2).toStringAsFixed(1)}x',
             onChanged: ttsNotifier.updateSpeechRate,
           ),
@@ -559,6 +561,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     required double max,
     required String displayValue,
     required ValueChanged<double> onChanged,
+    int? divisions,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -598,7 +601,13 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             overlayColor: _accent.withAlpha(30),
             trackHeight: 3,
           ),
-          child: Slider(value: value, min: min, max: max, onChanged: onChanged),
+          child: Slider(
+            value: value.clamp(min, max),
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
+          ),
         ),
       ],
     );
@@ -706,7 +715,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
               ),
             ),
             Text(
-              'Stop when other audio plays',
+              'Pause for calls and other apps\' audio',
               style: TextStyle(
                 color: widget.textColor.withAlpha(120),
                 fontSize: 11,
