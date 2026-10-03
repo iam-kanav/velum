@@ -45,3 +45,6 @@ app.*.map.json
 
 # Kotlin compiler session files
 android/.kotlin/
+
+# Claude Code local settings
+.claude/
