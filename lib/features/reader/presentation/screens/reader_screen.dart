@@ -7,6 +7,8 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../providers/reader_notifier.dart';
+import '../../data/services/chapter_processor.dart';
+import 'package:velum/features/library/data/services/library_service.dart';
 import '../widgets/reader_tutorial_overlay.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
@@ -14,7 +16,6 @@ import 'package:velum/features/settings/presentation/widgets/settings_modal.dart
 import 'package:velum/features/tts/data/models/tts_chunk.dart';
 import 'package:velum/features/tts/data/models/tts_settings.dart';
 import 'package:velum/features/tts/presentation/providers/tts_notifier.dart';
-import 'package:velum/features/tts/data/services/velum_audio_handler.dart';
 import 'package:go_router/go_router.dart';
 import '../../data/models/highlight.dart';
 import '../../data/models/bookmark.dart';
@@ -121,6 +122,15 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadChapterPositions();
+
+      // Highlight the sentence being read and follow it between chapters.
+      // Read-aloud is app-wide: it may already be reading this book (or
+      // another one) and carries on after this screen closes.
+      _ttsNotifier = context.read<TtsNotifier>();
+      _lastTtsChapter = _ttsNotifier!.chapterIndex;
+      _ttsNotifier!.addListener(_onTtsStateChanged);
+      _ttsNotifier!.onBookFinished = _onBookFinished;
+
       _readerNotifier = context.read<ReaderNotifier>();
       _readerNotifier!.addListener(_onReaderChanged);
       _readerNotifier!.loadBook(widget.assetPath);
@@ -134,36 +144,6 @@ class _ReaderScreenState extends State<ReaderScreen>
       _bookmarkNotifier = context.read<BookmarkNotifier>();
       _bookmarkNotifier!.loadBookmarks(widget.assetPath);
 
-      // Set up TTS callbacks and listener for highlight updates
-      _ttsNotifier = context.read<TtsNotifier>();
-      _ttsNotifier!.addListener(_onTtsStateChanged);
-
-      // Auto-continue to next chapter when TTS finishes
-      _ttsNotifier!.onChapterComplete = () {
-        final readerNotifier = context.read<ReaderNotifier>();
-
-        // Attempt to advance — nextChapter() is a no-op on the last chapter.
-        final chapterBefore = readerNotifier.currentChapter;
-        // Listening carries on into the next chapter from its beginning.
-        _chapterPositions.remove(readerNotifier.currentChapterIndex + 1);
-        readerNotifier.nextChapter();
-        final chapterAfter = readerNotifier.currentChapter;
-
-        if (chapterAfter == chapterBefore) {
-          // Chapter didn't change → we were on the last chapter.
-          _ttsNotifier!.stop();
-          if (mounted && !_isNote) setState(() => _showBookComplete = true);
-          return;
-        }
-
-        // Successfully moved to next chapter — animate and continue playing.
-        _animatePageTurn(-1);
-        Future.delayed(const Duration(milliseconds: 500), () {
-          if (mounted) {
-            if (_loadTts()) _ttsNotifier!.play();
-          }
-        });
-      };
     });
   }
 
@@ -176,8 +156,12 @@ class _ReaderScreenState extends State<ReaderScreen>
     WidgetsBinding.instance.removeObserver(this);
     _readerNotifier?.removeListener(_onReaderChanged);
     _highlightNotifier?.removeListener(_onHighlightChanged);
+    // Reading aloud carries on after the reader closes.
     _ttsNotifier?.removeListener(_onTtsStateChanged);
-    _ttsNotifier?.onChapterComplete = null;
+    if (_ttsNotifier?.onBookFinished == _onBookFinished) {
+      _ttsNotifier!.onBookFinished = null;
+    }
+    _continueFallback?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocusNode.dispose();
@@ -225,9 +209,13 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// Remember the chapter being left: scroll offset and read-aloud position.
   void _rememberChapter(int index) {
-    final chunk = _ttsNotifier?.currentChunk;
-    final hasTts = (_ttsNotifier?.chunks.isNotEmpty ?? false) &&
-        _ttsNotifier!.state != TtsState.idle;
+    final tts = _ttsNotifier;
+    final chunk = tts?.currentChunk;
+    final hasTts = tts != null &&
+        _ownsTts &&
+        tts.chapterIndex == index &&
+        tts.chunks.isNotEmpty &&
+        tts.state != TtsState.idle;
     final previous = _chapterPositions[index];
     _chapterPositions[index] = (
       scroll: _savedScrollPosition,
@@ -242,10 +230,11 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// gear was; taps landing during that move were meant for the gear.
   DateTime _fabMovedAt = DateTime(0);
 
-  /// Read-aloud belongs to the chapter it was started in, so any chapter
-  /// change (swipe, contents, search, highlights, bookmarks, start over)
-  /// stops it. Otherwise the old chapter's positions get highlighted on the
-  /// new page. Auto-continue reloads and restarts it after the change.
+  /// Changing chapter while reading aloud (swipe, contents, search,
+  /// highlights, bookmarks, start over) carries on reading in the new
+  /// chapter, from where its page opens. When not playing, the old
+  /// chapter's read-aloud position is dropped so it isn't highlighted on
+  /// the new page.
   void _onReaderChanged() {
     final showUI = _readerNotifier?.showUI;
     if (showUI != _lastShowUI) {
@@ -254,22 +243,174 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     final chapter = _readerNotifier?.currentChapter;
     if (identical(chapter, _shownChapter)) return;
-    if (_shownChapter != null) _rememberChapter(_shownChapterIndex);
-    _shownChapter = chapter;
-    _shownChapterIndex = _readerNotifier?.currentChapterIndex ?? 0;
+    final index = _readerNotifier?.currentChapterIndex ?? 0;
     final tts = _ttsNotifier;
-    if (tts != null && tts.chunks.isNotEmpty) {
+    final owns = tts != null && _ownsTts;
+
+    // Reopening the book being read aloud: show the chapter it's on.
+    if (_shownChapter == null &&
+        owns &&
+        tts.chunks.isNotEmpty &&
+        tts.chapterIndex != index &&
+        _followTtsChapter(tts.chapterIndex, animate: false)) {
+      return;
+    }
+
+    final firstShow = _shownChapter == null;
+    if (!firstShow) _rememberChapter(_shownChapterIndex);
+    _shownChapter = chapter;
+    _shownChapterIndex = index;
+    // The old page stays up until the new one loads: don't highlight the
+    // new chapter's sentences on it.
+    if (_readerNotifier!.getProcessedHtml() != _lastHtmlContent) {
+      _isPageReady = false;
+    }
+    if (firstShow || _followingTts || !owns) return;
+
+    if (tts.isPlaying) {
+      final paragraphs = _readerNotifier!.ttsParagraphs;
+      if (paragraphs.isNotEmpty) {
+        _lastTtsChapter = index;
+        tts.loadChapter(_readAloudBook(), index, paragraphs);
+        _waitToContinue();
+        return;
+      }
+    }
+    if (tts.chunks.isNotEmpty) {
       tts.stop();
       tts.clearContent();
     }
   }
 
+  /// Read-aloud is on this book (rather than another one, carrying on in
+  /// the background).
+  bool get _ownsTts => _ttsNotifier?.bookPath == widget.assetPath;
+
+  /// Read-aloud has the chapter on screen loaded.
+  bool get _ttsOnThisChapter {
+    final tts = _ttsNotifier;
+    return tts != null &&
+        _shownChapter != null &&
+        _ownsTts &&
+        tts.chunks.isNotEmpty &&
+        tts.chapterIndex == _shownChapterIndex;
+  }
+
+  /// The read-aloud chapter last seen here; a change means reading moved
+  /// on to the next chapter by itself.
+  int _lastTtsChapter = 0;
+  bool _followingTts = false;
+
+  /// Turn to the chapter read-aloud is on. False if there's no such page.
+  bool _followTtsChapter(int index, {bool animate = true}) {
+    final reader = _readerNotifier;
+    final chapters = reader?.currentBook?.Chapters;
+    if (reader == null || chapters == null || index >= chapters.length) {
+      return false;
+    }
+    if (animate) {
+      // Listening starts the chapter from the top.
+      _chapterPositions.remove(index);
+      _animatePageTurn(index > _shownChapterIndex ? -1 : 1);
+    } else {
+      // The saved scroll position belongs to another chapter.
+      _isInitialLoad = false;
+    }
+    _followingTts = true;
+    reader.jumpToChapter(chapters[index]);
+    _followingTts = false;
+    return true;
+  }
+
+  void _onBookFinished() {
+    if (mounted && _ownsTts && !_isNote) {
+      setState(() => _showBookComplete = true);
+    }
+  }
+
+  /// This book as read-aloud sees it, so it can carry on into later
+  /// chapters with the reader closed.
+  ReadAloudBook _readAloudBook() {
+    final book = _readerNotifier!.currentBook;
+    final chapters = [...?book?.Chapters];
+    final library = context.read<LibraryService>();
+    final path = widget.assetPath;
+    return ReadAloudBook(
+      path: path,
+      title: book?.Title ?? 'Unknown Book',
+      chapterTitles: [for (final c in chapters) c.Title ?? 'Unknown Chapter'],
+      // Same paragraphs as the page: inlining images doesn't change text.
+      paragraphsFor: (i) =>
+          ChapterProcessor.process(chapters[i].HtmlContent ?? '').$2,
+      onChapterStarted: (i) => library.updateReadingProgress(path, i, 0),
+    );
+  }
+
+  /// Reading carried on into a new chapter and waits, still "playing", for
+  /// its page to say where to start (see onPageFinished).
+  bool _continuePending = false;
+  Timer? _continueFallback;
+
+  void _waitToContinue() {
+    _continuePending = true;
+    // Same page content (chapters that share one file): no reload coming.
+    if (_isPageReady) _askWhereToContinue();
+    _continueFallback?.cancel();
+    // If the page never reports, start from the remembered sentence.
+    _continueFallback = Timer(const Duration(seconds: 5), () {
+      final remembered = _chapterPositions[_shownChapterIndex];
+      _continueReading(
+        remembered?.para == null
+            ? ''
+            : '${remembered!.para}:${remembered.sent ?? ''}',
+      );
+    });
+  }
+
+  /// Ask the page where reading should carry on: the remembered sentence
+  /// if it's on screen, else the first one visible. It answers with a
+  /// 'tts-start:' message once any scrolling has settled.
+  void _askWhereToContinue() {
+    final jumping =
+        _pendingScrollHighlightId != null || _pendingScrollPercent != null;
+    final remembered = _chapterPositions[_shownChapterIndex];
+    final top = (MediaQuery.of(context).padding.top + kToolbarHeight).round();
+    _controller.runJavaScript(
+      'window.ttsContinueFrom($top, ${remembered?.para ?? -1}, '
+      '${remembered?.sent ?? -1}, ${jumping ? 400 : 100});',
+    );
+  }
+
+  /// Start reading the chapter just turned to at [start] ("para:sent",
+  /// "para", or "" for its first sentence).
+  void _continueReading(String start) {
+    if (!_continuePending) return;
+    _continuePending = false;
+    _continueFallback?.cancel();
+    final tts = _ttsNotifier;
+    if (tts == null || !_ttsOnThisChapter) return;
+    final parts = start.split(':');
+    final para = int.tryParse(parts.first) ?? tts.chunks.first.paragraphIndex;
+    final sent = parts.length > 1 ? int.tryParse(parts[1]) : null;
+    if (tts.isPlaying) {
+      tts.jumpTo(para, sent);
+    } else if (tts.isPaused) {
+      tts.moveTo(para, sent); // paused while the page was loading
+    }
+    _updateTtsHighlight(tts);
+  }
+
   /// Listener for TTS state changes - updates WebView highlight via JS
   /// without triggering a full widget rebuild.
   void _onTtsStateChanged() {
-    if (_ttsNotifier != null) {
-      _updateTtsHighlight(_ttsNotifier!);
+    final tts = _ttsNotifier;
+    if (tts == null) return;
+    // Reading moved on to the next chapter by itself: turn the page with it.
+    if (_ownsTts && tts.chapterIndex != _lastTtsChapter) {
+      _lastTtsChapter = tts.chapterIndex;
+      _followTtsChapter(tts.chapterIndex);
     }
+    _updateTtsHighlight(tts);
   }
 
   /// Sanitize a string to only allow UUID characters (alphanumeric + hyphens).
@@ -468,6 +609,10 @@ class _ReaderScreenState extends State<ReaderScreen>
                   setState(() => _showColorPicker = false);
                 }
               }
+              // Where read-aloud carries on after a chapter change
+              else if (message.message.startsWith('tts-start:')) {
+                _continueReading(message.message.substring(10));
+              }
               // Handle TTS skip to paragraph/sentence
               else if (message.message.startsWith('tts-skip:')) {
                 final parts = message.message.substring(9).split(':');
@@ -516,6 +661,10 @@ class _ReaderScreenState extends State<ReaderScreen>
               );
               _shouldRestoreScroll = false;
             }
+            // Reading aloud carried on into this chapter: start where the
+            // page opens, once any jump to a highlight or search result
+            // (below, after 300 ms) has finished.
+            if (_continuePending && mounted) _askWhereToContinue();
             // Scroll to a pending highlight if navigated from highlights modal
             if (_pendingScrollHighlightId != null) {
               final hlId = _sanitizeId(_pendingScrollHighlightId!);
@@ -540,27 +689,27 @@ class _ReaderScreenState extends State<ReaderScreen>
       );
   }
 
-  /// Load the current chapter into the TTS player if it isn't already, and
-  /// show the book/chapter on the lock screen. Returns false if the chapter
-  /// has nothing to read.
+  /// Make the chapter on screen the one read aloud, unless it already is
+  /// (taking over from another chapter or book). Returns false if the
+  /// chapter has nothing to read.
   bool _loadTts() {
-    final tts = context.read<TtsNotifier>();
-    final reader = context.read<ReaderNotifier>();
-    if (tts.chunks.isEmpty) {
-      final paragraphs = reader.ttsParagraphs;
-      if (paragraphs.isEmpty) return false;
-      tts.loadContent(paragraphs);
-    }
-    context.read<VelumAudioHandler>().setMediaMetadata(
-      bookTitle: reader.currentBook?.Title ?? 'Unknown Book',
-      chapterTitle: reader.currentChapter?.Title ?? 'Unknown Chapter',
-    );
+    _continuePending = false;
+    _continueFallback?.cancel();
+    if (_ttsOnThisChapter) return true;
+    final paragraphs = _readerNotifier!.ttsParagraphs;
+    if (paragraphs.isEmpty) return false;
+    _lastTtsChapter = _shownChapterIndex;
+    context.read<TtsNotifier>().loadChapter(
+          _readAloudBook(),
+          _shownChapterIndex,
+          paragraphs,
+        );
     return true;
   }
 
   /// Open the editor for this note; reload it if it was changed.
   Future<void> _editNote() async {
-    await _ttsNotifier?.pause();
+    if (_ownsTts) await _ttsNotifier?.pause();
     if (!mounted) return;
     final changed = await context.push<bool>(
       '/editor?path=${Uri.encodeComponent(widget.assetPath)}',
@@ -575,9 +724,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _onPlayPressed() async {
     if (DateTime.now().difference(_fabMovedAt).inMilliseconds < 500) return;
     final tts = context.read<TtsNotifier>();
-    if (tts.isPlaying) return tts.pause();
-    if (tts.isPaused) return tts.play();
-    final wasLoaded = tts.chunks.isNotEmpty;
+    final wasLoaded = _ttsOnThisChapter;
+    if (wasLoaded && tts.isPlaying) return tts.pause();
+    if (wasLoaded && tts.isPaused) return tts.play();
     if (!_loadTts()) return;
 
     // Prefer the sentence last read here: the current one, or the one this
@@ -619,7 +768,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     // null in paragraph mode, so the whole paragraph is highlighted
     final sentence = currentChunk?.sentenceIndex;
 
-    if (ttsNotifier.isPlaying || ttsNotifier.isPaused) {
+    // While waiting to carry on in a new chapter there's nothing to show
+    // yet, and highlighting its first sentence would scroll the page there.
+    if (_ttsOnThisChapter &&
+        !_continuePending &&
+        (ttsNotifier.isPlaying || ttsNotifier.isPaused)) {
       if (currentPara == null) return;
       final key = '$currentPara-$sentence';
       if (key == _lastHighlightKey) return;
@@ -655,6 +808,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               builder: (context, ttsNotifier, _) {
                 return TtsFab(
                   ttsNotifier: ttsNotifier,
+                  active: _ttsOnThisChapter,
                   onPressed: _onPlayPressed,
                   // Sit right on top of the bar (or the ad area when the bar
                   // is hidden). Scaffold already adds the system inset + 16.
@@ -902,7 +1056,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                     if (_followOff && !_showSearch && !_showColorPicker)
                       Consumer<TtsNotifier>(
                         builder: (context, tts, _) {
-                          if (!tts.isPlaying && !tts.isPaused) {
+                          if (!_ttsOnThisChapter ||
+                              (!tts.isPlaying && !tts.isPaused)) {
                             return const SizedBox.shrink();
                           }
                           return AnimatedPositioned(

@@ -18,25 +18,31 @@ class VelumAudioHandler extends BaseAudioHandler {
     _ttsNotifier = null;
   }
 
-  /// Update notification metadata (call when book/chapter changes).
-  void setMediaMetadata({
-    required String bookTitle,
-    required String chapterTitle,
-  }) {
-    mediaItem.add(MediaItem(
-      id: 'velum_tts',
-      title: chapterTitle,
-      album: bookTitle,
-      artist: 'Velum Reader',
-      displayTitle: chapterTitle,
-      displaySubtitle: bookTitle,
-    ));
-  }
+  String? _bookTitle;
+  String? _chapterTitle;
 
-  /// Map TtsNotifier state -> audio_service PlaybackState.
+  /// Map TtsNotifier state -> audio_service media item and PlaybackState.
+  /// Only real changes are sent: this runs on every highlight update, and
+  /// rebuilding the notification each sentence slows the phone down.
   void _syncPlaybackState() {
     final notifier = _ttsNotifier;
     if (notifier == null) return;
+
+    if (notifier.bookTitle != _bookTitle ||
+        notifier.chapterTitle != _chapterTitle) {
+      _bookTitle = notifier.bookTitle;
+      _chapterTitle = notifier.chapterTitle;
+      final bookTitle = _bookTitle ?? 'Unknown Book';
+      final chapterTitle = _chapterTitle ?? 'Unknown Chapter';
+      mediaItem.add(MediaItem(
+        id: 'velum_tts',
+        title: chapterTitle,
+        album: bookTitle,
+        artist: 'Velum Reader',
+        displayTitle: chapterTitle,
+        displaySubtitle: bookTitle,
+      ));
+    }
 
     final AudioProcessingState processingState;
     final bool playing;
@@ -52,6 +58,12 @@ class VelumAudioHandler extends BaseAudioHandler {
       case TtsState.idle:
         processingState = AudioProcessingState.idle;
         playing = false;
+    }
+
+    final current = playbackState.value;
+    if (current.playing == playing &&
+        current.processingState == processingState) {
+      return;
     }
 
     final controls = [

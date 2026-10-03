@@ -19,6 +19,7 @@ import 'features/library/presentation/providers/library_notifier.dart';
 import 'features/tts/data/services/device_tts_engine.dart';
 import 'features/tts/data/services/edge_tts_engine.dart';
 import 'features/tts/data/services/velum_audio_handler.dart';
+import 'features/tts/presentation/providers/tts_notifier.dart';
 
 import 'features/library/data/services/collection_service.dart';
 
@@ -100,6 +101,19 @@ class MainApp extends StatelessWidget {
           ),
         ),
         Provider<VelumAudioHandler>.value(value: audioHandler),
+        // App-wide, so reading aloud carries on in the library and while
+        // another book is open.
+        ChangeNotifierProvider(
+          create: (context) {
+            final ttsNotifier = TtsNotifier(
+              context.read<DeviceTtsEngine>(),
+              context.read<EdgeTtsEngine>(),
+              context.read<SharedPreferences>(),
+            )..init();
+            audioHandler.attachNotifier(ttsNotifier);
+            return ttsNotifier;
+          },
+        ),
       ],
       child: const VelumApp(),
     );

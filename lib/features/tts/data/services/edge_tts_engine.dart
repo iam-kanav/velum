@@ -58,7 +58,10 @@ class _AudioCache {
 
 /// Experimental engine: Microsoft Edge neural voices (online) played via just_audio.
 class EdgeTtsEngine extends TtsEngine {
-  final AudioPlayer _player = AudioPlayer();
+  // TtsNotifier handles interruptions for both engines. Left on, the player
+  // also paused and resumed itself whenever another app made a sound, even
+  // with "pause for other audio" turned off.
+  final AudioPlayer _player = AudioPlayer(handleInterruptions: false);
 
   List<TtsVoice> _voices = [];
   bool _initialized = false;

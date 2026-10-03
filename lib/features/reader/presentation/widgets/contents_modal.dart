@@ -15,12 +15,50 @@ class ContentsModal extends StatefulWidget {
 
 class _ContentsModalState extends State<ContentsModal> {
   final TextEditingController _searchController = TextEditingController();
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _currentChapterKey = GlobalKey();
   String _filter = '';
+
+  /// Height of a one-line row. Long titles wrap, so rows are at least this.
+  static const double _rowHeight = 56;
+  int _furthestBuiltRow = -1;
+  int _revealAttempts = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealCurrentChapter());
+  }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  /// Open the list at the chapter being read. Rows are built lazily, so
+  /// jump towards it until its row exists, then centre it.
+  void _revealCurrentChapter() {
+    if (!mounted || !_scrollController.hasClients) return;
+    final rowContext = _currentChapterKey.currentContext;
+    if (rowContext != null) {
+      Scrollable.ensureVisible(rowContext, alignment: 0.4);
+      return;
+    }
+    if (++_revealAttempts > 20) return;
+    final index = context.read<ReaderNotifier>().currentChapterIndex;
+    final position = _scrollController.position;
+    // Wrapped titles make rows taller than the estimate, so the first jump
+    // can land short; step on past the furthest row built so far.
+    final target = _revealAttempts == 1
+        ? index * _rowHeight
+        : position.pixels +
+            (index - _furthestBuiltRow) * _rowHeight +
+            position.viewportDimension / 2;
+    if (target <= position.pixels) return;
+    _scrollController.jumpTo(target);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revealCurrentChapter());
   }
 
   @override
@@ -141,13 +179,16 @@ class _ContentsModalState extends State<ContentsModal> {
                         ),
                       )
                     : ListView.builder(
+                        controller: _scrollController,
                         itemCount: filteredIndices.length,
                         padding: const EdgeInsets.only(bottom: 16),
                         itemBuilder: (context, i) {
                           final index = filteredIndices[i];
                           final chapter = chapters[index];
                           final isSelected = notifier.currentChapter == chapter;
+                          if (index > _furthestBuiltRow) _furthestBuiltRow = index;
                           return ListTile(
+                            key: isSelected ? _currentChapterKey : null,
                             title: Text(
                               chapter.Title ?? 'Chapter ${index + 1}',
                               style: TextStyle(

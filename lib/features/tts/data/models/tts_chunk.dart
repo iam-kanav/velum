@@ -47,3 +47,27 @@ List<TtsChunk> chunkParagraphs(
   }
   return chunks;
 }
+
+/// The book being read aloud. Reading carries on into its next chapters
+/// even after the reader screen is closed, so it needs its own way to get
+/// each chapter's text.
+class ReadAloudBook {
+  final String path;
+  final String title;
+  final List<String> chapterTitles;
+
+  /// Paragraphs of a chapter, indexed like the reader page's `data-para`.
+  final List<TtsParagraph> Function(int chapter) paragraphsFor;
+
+  /// Called when reading moves on to a chapter by itself, so the book
+  /// reopens there.
+  final void Function(int chapter) onChapterStarted;
+
+  const ReadAloudBook({
+    required this.path,
+    required this.title,
+    required this.chapterTitles,
+    required this.paragraphsFor,
+    required this.onChapterStarted,
+  });
+}

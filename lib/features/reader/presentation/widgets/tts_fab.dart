@@ -8,6 +8,10 @@ import 'package:velum/core/theme/app_colors.dart';
 class TtsFab extends StatelessWidget {
   final TtsNotifier ttsNotifier;
 
+  /// Read-aloud is on this chapter. When it's reading something else (in
+  /// the background), the button offers to start reading here.
+  final bool active;
+
   /// Play/pause. The reader decides where playback starts (what's on screen).
   final VoidCallback onPressed;
   /// Distance above the Scaffold's default FAB position.
@@ -22,6 +26,7 @@ class TtsFab extends StatelessWidget {
   const TtsFab({
     super.key,
     required this.ttsNotifier,
+    required this.active,
     required this.onPressed,
     required this.bottomMargin,
     required this.isOverlayOpen,
@@ -36,8 +41,8 @@ class TtsFab extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    final isPlaying = ttsNotifier.isPlaying;
-    final isSynthesizing = ttsNotifier.isSynthesizing;
+    final isPlaying = active && ttsNotifier.isPlaying;
+    final isSynthesizing = active && ttsNotifier.isSynthesizing;
     final progress = ttsNotifier.synthesisProgress;
     final percent = (progress * 100).round();
 

@@ -227,6 +227,27 @@ window.ttsVisibleStart = function(top, prefPara, prefSent) {
   return '';
 };
 
+// After a chapter change during read-aloud: wait [delay] ms for any jump to
+// the reader's spot (bookmark, search result, remembered place), then for the
+// page to stop scrolling, and report where reading should carry on.
+window.ttsContinueFrom = function(top, prefPara, prefSent, delay) {
+  var last = -1, still = 0;
+  var check = function() {
+    if (window.scrollY === last) {
+      still++;
+    } else {
+      still = 0;
+      last = window.scrollY;
+    }
+    if (still >= 3) {
+      ReaderChannel.postMessage('tts-start:' + window.ttsVisibleStart(top, prefPara, prefSent));
+    } else {
+      setTimeout(check, 50);
+    }
+  };
+  setTimeout(check, delay);
+};
+
 // Scroll listener to update Flutter state
 var scrollTimeout;
 window.addEventListener('scroll', function() {

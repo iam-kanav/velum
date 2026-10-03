@@ -8,7 +8,8 @@ import '../../data/services/device_tts_engine.dart';
 import '../../data/services/edge_tts_engine.dart';
 import '../../data/services/tts_engine.dart';
 
-/// State management for TTS functionality
+/// State management for TTS functionality. Lives for the whole app, so
+/// reading carries on in the library or while another book is open.
 class TtsNotifier extends ChangeNotifier {
   final DeviceTtsEngine _device;
   final EdgeTtsEngine _edge;
@@ -30,6 +31,7 @@ class TtsNotifier extends ChangeNotifier {
   TtsSettings _settings = const TtsSettings();
   AudioSession? _audioSession;
   StreamSubscription? _audioInterruptionSub;
+  StreamSubscription? _becomingNoisySub;
   TtsState _state = TtsState.idle;
   List<TtsParagraph> _paragraphs = [];
   List<TtsChunk> _chunks = [];
@@ -37,8 +39,26 @@ class TtsNotifier extends ChangeNotifier {
   bool _isInitialized = false;
   bool _disposed = false;
 
-  /// Callback when chapter playback completes (all chunks finished)
-  VoidCallback? onChapterComplete;
+  /// True once the engine has started the current chunk, so a pause can be
+  /// resumed in place. False after new content or a stop.
+  bool _canResume = false;
+
+  // The book and chapter being read aloud
+  ReadAloudBook? _book;
+  int _chapterIndex = 0;
+
+  /// Called when reading reaches the end of the book.
+  VoidCallback? onBookFinished;
+
+  String? get bookPath => _book?.path;
+  String? get bookTitle => _book?.title;
+  int get chapterIndex => _chapterIndex;
+  String? get chapterTitle {
+    final titles = _book?.chapterTitles;
+    return titles != null && _chapterIndex < titles.length
+        ? titles[_chapterIndex]
+        : null;
+  }
 
   TtsSettings get settings => _settings;
   TtsState get state => _state;
@@ -106,6 +126,10 @@ class TtsNotifier extends ChangeNotifier {
       );
       _audioInterruptionSub =
           _audioSession!.interruptionEventStream.listen(_onInterruption);
+      // Headphones unplugged: don't carry on out loud.
+      _becomingNoisySub = _audioSession!.becomingNoisyEventStream.listen((_) {
+        if (isPlaying) pause();
+      });
     } catch (e) {
       debugPrint('Audio session setup failed: $e');
     }
@@ -115,6 +139,11 @@ class TtsNotifier extends ChangeNotifier {
   /// (a call, a voice assistant), so it resumes by itself afterwards.
   bool _pausedByInterruption = false;
 
+  /// Apps often grab audio for a moment as they open or close. Reading only
+  /// pauses for a temporary interruption that lasts longer than this.
+  static const _interruptionGrace = Duration(milliseconds: 1500);
+  Timer? _interruptionPause;
+
   void _onInterruption(AudioInterruptionEvent event) {
     if (!_settings.stopOnAudioFocusLoss) return;
     if (event.begin) {
@@ -123,14 +152,21 @@ class TtsNotifier extends ChangeNotifier {
           break; // notification sound: keep reading
         case AudioInterruptionType.pause:
           if (isPlaying) {
-            pause();
-            _pausedByInterruption = true;
+            _interruptionPause?.cancel();
+            _interruptionPause = Timer(_interruptionGrace, () {
+              if (!isPlaying) return;
+              pause();
+              _pausedByInterruption = true;
+            });
           }
         case AudioInterruptionType.unknown:
           // Another app took over audio for good (e.g. music started):
           // pause, and let the user resume from the same word.
+          _interruptionPause?.cancel();
           if (isPlaying) pause();
       }
+    } else if (_interruptionPause?.isActive ?? false) {
+      _interruptionPause!.cancel(); // over before reading had to pause
     } else if (_pausedByInterruption) {
       _pausedByInterruption = false;
       if (isPaused) play();
@@ -219,14 +255,33 @@ class TtsNotifier extends ChangeNotifier {
     }
 
     // Finished all chunks in this chapter
-    _state = TtsState.stopped;
     _currentChunkIndex = 0;
     if (_sleepTimer == SleepTimer.endOfChapter) {
       setSleepTimer(SleepTimer.off);
-    } else if (_settings.autoContinue) {
-      onChapterComplete?.call();
+    } else if (_settings.autoContinue && _book != null) {
+      _continueToNextChapter();
+      return;
     }
+    _state = TtsState.stopped;
     _notify();
+  }
+
+  /// Carry on into the next chapter that has text (skipping covers and
+  /// image pages), whether or not the reader screen is open.
+  void _continueToNextChapter() {
+    final book = _book!;
+    for (var i = _chapterIndex + 1; i < book.chapterTitles.length; i++) {
+      final paragraphs = book.paragraphsFor(i);
+      if (paragraphs.isEmpty) continue;
+      _chapterIndex = i;
+      book.onChapterStarted(i);
+      loadContent(paragraphs);
+      _speakCurrentChunk();
+      return;
+    }
+    _state = TtsState.stopped;
+    _notify();
+    onBookFinished?.call();
   }
 
   void _onError(String error) {
@@ -237,9 +292,31 @@ class TtsNotifier extends ChangeNotifier {
 
   // Content
 
+  /// Read [chapter] of [book] aloud from now on, replacing whatever was
+  /// loaded (another chapter, or another book). If reading was playing it
+  /// stays "playing" without a sound until the caller picks the start with
+  /// [jumpTo], so switching chapters never shows as a pause.
+  Future<void> loadChapter(
+    ReadAloudBook book,
+    int chapter,
+    List<TtsParagraph> paragraphs,
+  ) async {
+    _interruptionPause?.cancel();
+    _pausedByInterruption = false;
+    if (_state == TtsState.paused) _state = TtsState.stopped;
+    _book = book;
+    _chapterIndex = chapter;
+    // Swap the content before awaiting, so a jumpTo straight after this
+    // call already sees the new chapter.
+    final stopped = _engine.stop();
+    loadContent(paragraphs);
+    await stopped;
+  }
+
   /// Load a chapter's paragraphs and prepare them for playback.
   /// [startFromChunk] prioritises preparation from that chunk onward.
   void loadContent(List<TtsParagraph> paragraphs, {int startFromChunk = 0}) {
+    _canResume = false;
     _paragraphs = paragraphs;
     _chunks = chunkParagraphs(paragraphs, _settings.highlightMode);
     _currentChunkIndex =
@@ -258,6 +335,7 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Clear current content (for chapter changes)
   void clearContent() {
+    _canResume = false;
     _paragraphs = [];
     _chunks = [];
     _currentChunkIndex = 0;
@@ -270,6 +348,7 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Start or resume playback
   Future<void> play() async {
+    _interruptionPause?.cancel();
     _pausedByInterruption = false;
     if (_chunks.isEmpty) return;
     final wasPaused = _state == TtsState.paused;
@@ -277,8 +356,9 @@ class TtsNotifier extends ChangeNotifier {
     // Update state immediately so the button and highlight respond instantly
     _state = TtsState.playing;
     _notify();
+    await _activateSession();
 
-    if (wasPaused && _engine.supportsResume) {
+    if (wasPaused && _canResume && _engine.supportsResume) {
       await _engine.resume();
     } else {
       await _speakCurrentChunk();
@@ -287,6 +367,7 @@ class TtsNotifier extends ChangeNotifier {
 
   Future<void> pause() async {
     // A manual pause (or one from the timer) shouldn't auto-resume later.
+    _interruptionPause?.cancel();
     _pausedByInterruption = false;
     _state = TtsState.paused;
     _notify();
@@ -295,7 +376,9 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Stop playback (preserves position so play picks up where we left off)
   Future<void> stop() async {
+    _interruptionPause?.cancel();
     _pausedByInterruption = false;
+    _canResume = false;
     _state = TtsState.stopped;
     _notify();
     await _engine.stop();
@@ -305,19 +388,23 @@ class TtsNotifier extends ChangeNotifier {
 
   Future<void> jumpToParagraph(int paragraphIndex) => jumpTo(paragraphIndex);
 
-  /// Jump to a paragraph (or a sentence inside it) and start playing.
-  /// The highlight moves immediately, before any audio is ready.
-  Future<void> jumpTo(int paragraphIndex, [int? sentenceIndex]) async {
-    var index = sentenceIndex == null
+  int _chunkIndexOf(int paragraphIndex, int? sentenceIndex) {
+    final index = sentenceIndex == null
         ? -1
         : _chunks.indexWhere(
             (c) =>
                 c.paragraphIndex == paragraphIndex &&
                 c.sentenceIndex == sentenceIndex,
           );
-    if (index < 0) {
-      index = _chunks.indexWhere((c) => c.paragraphIndex == paragraphIndex);
-    }
+    return index >= 0
+        ? index
+        : _chunks.indexWhere((c) => c.paragraphIndex == paragraphIndex);
+  }
+
+  /// Jump to a paragraph (or a sentence inside it) and start playing.
+  /// The highlight moves immediately, before any audio is ready.
+  Future<void> jumpTo(int paragraphIndex, [int? sentenceIndex]) async {
+    final index = _chunkIndexOf(paragraphIndex, sentenceIndex);
     if (index < 0) return;
 
     await _engine.stop();
@@ -325,18 +412,33 @@ class TtsNotifier extends ChangeNotifier {
     _state = TtsState.playing;
     _notify();
     _prepare(); // re-prioritise synthesis from the new position
+    await _activateSession();
     await _speakCurrentChunk();
+  }
+
+  /// Move to a paragraph (or sentence) without starting playback.
+  void moveTo(int paragraphIndex, [int? sentenceIndex]) {
+    final index = _chunkIndexOf(paragraphIndex, sentenceIndex);
+    if (index < 0 || index == _currentChunkIndex) return;
+    _canResume = false;
+    _currentChunkIndex = index;
+    _prepare();
+    _notify();
+  }
+
+  /// Hold audio focus while reading, so we hear about interruptions.
+  /// Requested when playback starts, not before every sentence: asking
+  /// again each time would take the audio back from whoever has it.
+  Future<void> _activateSession() async {
+    if (_audioSession == null || !_settings.stopOnAudioFocusLoss) return;
+    try {
+      await _audioSession!.setActive(true);
+    } catch (_) {}
   }
 
   Future<void> _speakCurrentChunk() async {
     if (_currentChunkIndex >= _chunks.length) return;
-
-    // Activate audio session so we receive interruption events
-    if (_audioSession != null && _settings.stopOnAudioFocusLoss) {
-      try {
-        await _audioSession!.setActive(true);
-      } catch (_) {}
-    }
+    _canResume = true;
 
     // Prefetch the next few chunks for seamless playback
     for (int i = 1; i <= 3 && _currentChunkIndex + i < _chunks.length; i++) {
@@ -522,7 +624,9 @@ class TtsNotifier extends ChangeNotifier {
     _settingsDebounce?.cancel();
     _sleepFire?.cancel();
     _sleepTick?.cancel();
+    _interruptionPause?.cancel();
     _audioInterruptionSub?.cancel();
+    _becomingNoisySub?.cancel();
     // Engines are shared app-wide and reused on the next Reader visit,
     // so only stop them and detach (unless another notifier took over).
     _engine.stop();
