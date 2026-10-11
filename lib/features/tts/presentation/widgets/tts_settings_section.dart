@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../../data/models/tts_settings.dart';
 import '../../data/services/device_tts_engine.dart';
 import '../providers/tts_notifier.dart';
+import 'pronunciations_dialog.dart';
 import 'package:velum/core/theme/app_colors.dart';
 
 const Color _accent = AppColors.accent;
@@ -375,7 +376,11 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           // Audio Focus Toggle
           _buildAudioFocusToggle(ttsNotifier),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 8),
+
+          _buildPronunciationsRow(ttsNotifier),
+
+          const SizedBox(height: 16),
 
           // Experimental: Edge online voices
           _buildExperimentalSection(ttsNotifier),
@@ -730,6 +735,56 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           activeTrackColor: _accent.withAlpha(80),
         ),
       ],
+    );
+  }
+
+  Widget _buildPronunciationsRow(TtsNotifier ttsNotifier) {
+    final count = ttsNotifier.pronunciations.length;
+    return InkWell(
+      onTap: () => showPronunciationsDialog(
+        context,
+        ttsNotifier,
+        textColor: widget.textColor,
+        backgroundColor: widget.backgroundColor,
+      ),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Pronunciations',
+                    style: TextStyle(
+                      color: widget.textColor.withAlpha(200),
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    'Read words differently from how they\'re written',
+                    style: TextStyle(
+                      color: widget.textColor.withAlpha(120),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (count > 0)
+              Text(
+                '$count',
+                style: TextStyle(
+                  color: widget.textColor.withAlpha(150),
+                  fontSize: 13,
+                ),
+              ),
+            Icon(Icons.chevron_right, color: widget.textColor.withAlpha(150)),
+          ],
+        ),
+      ),
     );
   }
 

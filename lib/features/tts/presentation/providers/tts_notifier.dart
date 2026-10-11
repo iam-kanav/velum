@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../../data/models/pronunciation.dart';
 import '../../data/models/tts_chunk.dart';
 import '../../data/models/tts_settings.dart';
 import '../../data/services/device_tts_engine.dart';
@@ -27,8 +29,10 @@ class TtsNotifier extends ChangeNotifier {
   static const String _highlightModeKey = 'tts_highlight_mode';
   static const String _autoContinueKey = 'tts_auto_continue';
   static const String _stopOnAudioFocusLossKey = 'tts_stop_on_audio_focus_loss';
+  static const String _pronunciationsKey = 'tts_pronunciations';
 
   TtsSettings _settings = const TtsSettings();
+  Pronunciations _pronunciations = Pronunciations(Pronunciations.defaults);
   AudioSession? _audioSession;
   StreamSubscription? _audioInterruptionSub;
   StreamSubscription? _becomingNoisySub;
@@ -61,6 +65,7 @@ class TtsNotifier extends ChangeNotifier {
   }
 
   TtsSettings get settings => _settings;
+  List<Pronunciation> get pronunciations => _pronunciations.rules;
   TtsState get state => _state;
   List<TtsChunk> get chunks => _chunks;
   TtsChunk? get currentChunk =>
@@ -213,6 +218,19 @@ class TtsNotifier extends ChangeNotifier {
       deviceVoice: deviceVoice,
       edgeVoice: edgeVoice,
     );
+
+    // Never saved yet: start with the built-in titles.
+    final saved = _prefs.getString(_pronunciationsKey);
+    if (saved != null) {
+      try {
+        _pronunciations = Pronunciations([
+          for (final json in jsonDecode(saved) as List)
+            ?Pronunciation.fromJson(json),
+        ]);
+      } catch (e) {
+        debugPrint('Could not read pronunciations: $e');
+      }
+    }
   }
 
   Future<void> _saveSettings() async {
@@ -318,7 +336,11 @@ class TtsNotifier extends ChangeNotifier {
   void loadContent(List<TtsParagraph> paragraphs, {int startFromChunk = 0}) {
     _canResume = false;
     _paragraphs = paragraphs;
-    _chunks = chunkParagraphs(paragraphs, _settings.highlightMode);
+    _chunks = chunkParagraphs(
+      paragraphs,
+      _settings.highlightMode,
+      _pronunciations,
+    );
     _currentChunkIndex =
         _chunks.isEmpty ? 0 : startFromChunk.clamp(0, _chunks.length - 1);
     _prepare();
@@ -567,7 +589,7 @@ class TtsNotifier extends ChangeNotifier {
       final wasPlaying = isPlaying;
       if (wasPlaying) await _engine.stop();
 
-      _chunks = chunkParagraphs(_paragraphs, mode);
+      _chunks = chunkParagraphs(_paragraphs, mode, _pronunciations);
       _currentChunkIndex = _chunks
           .indexWhere((c) => c.paragraphIndex == currentParagraph)
           .clamp(0, _chunks.length - 1);
@@ -588,6 +610,27 @@ class TtsNotifier extends ChangeNotifier {
     _settings = _settings.copyWith(stopOnAudioFocusLoss: value);
     await _saveSettings();
     _notify();
+  }
+
+  /// Replace the pronunciation rules. The sentence being spoken finishes as
+  /// it was; everything after it is read with the new rules.
+  Future<void> updatePronunciations(List<Pronunciation> rules) async {
+    _pronunciations = Pronunciations(List.unmodifiable(rules));
+    _notify();
+    await _prefs.setString(
+      _pronunciationsKey,
+      jsonEncode([for (final r in rules) r.toJson()]),
+    );
+
+    // Same paragraphs and highlight mode, so chunk positions don't move.
+    if (_chunks.isNotEmpty) {
+      _chunks = chunkParagraphs(
+        _paragraphs,
+        _settings.highlightMode,
+        _pronunciations,
+      );
+      _prepare();
+    }
   }
 
   /// Preview the current voice with a short sample sentence.

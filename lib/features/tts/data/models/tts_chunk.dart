@@ -1,3 +1,4 @@
+import 'pronunciation.dart';
 import 'tts_settings.dart';
 
 /// A sentence inside a paragraph. [index] matches the `data-sent` attribute
@@ -27,20 +28,27 @@ class TtsChunk {
   });
 }
 
-/// Split paragraphs into speakable chunks for the given highlight mode.
+/// Split paragraphs into speakable chunks for the given highlight mode,
+/// with [pronunciations] applied to the text the voice reads.
 List<TtsChunk> chunkParagraphs(
   List<TtsParagraph> paragraphs,
-  TtsHighlightMode mode,
-) {
+  TtsHighlightMode mode, [
+  Pronunciations? pronunciations,
+]) {
+  String spoken(String text) => pronunciations?.apply(text) ?? text;
   final chunks = <TtsChunk>[];
   for (int p = 0; p < paragraphs.length; p++) {
     final para = paragraphs[p];
     if (mode == TtsHighlightMode.paragraph || para.sentences.isEmpty) {
-      chunks.add(TtsChunk(text: para.text, paragraphIndex: p));
+      chunks.add(TtsChunk(text: spoken(para.text), paragraphIndex: p));
     } else {
       for (final s in para.sentences) {
         chunks.add(
-          TtsChunk(text: s.text, paragraphIndex: p, sentenceIndex: s.index),
+          TtsChunk(
+            text: spoken(s.text),
+            paragraphIndex: p,
+            sentenceIndex: s.index,
+          ),
         );
       }
     }

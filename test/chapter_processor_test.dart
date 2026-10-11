@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:velum/features/reader/data/services/chapter_processor.dart';
+import 'package:velum/features/tts/data/models/pronunciation.dart';
 import 'package:velum/features/tts/data/models/tts_chunk.dart';
 import 'package:velum/features/tts/data/models/tts_settings.dart';
 
@@ -202,6 +203,56 @@ void main() {
         ('A first. A second.', 1, null),
         ('Alone.', 2, null),
       ]);
+    });
+  });
+
+  group('pronunciations', () {
+    test('the default titles are spelled out so the voice does not pause', () {
+      final (_, paragraphs) = ChapterProcessor.process(
+        '<p>Mr. Darcy met Mrs. Bennet. Ms. Lucas and Dr. Jones left.</p>',
+      );
+      final chunks = chunkParagraphs(
+        paragraphs,
+        TtsHighlightMode.sentence,
+        Pronunciations(Pronunciations.defaults),
+      );
+      expect(chunks.map((c) => c.text), [
+        'Mister Darcy met Missus Bennet.',
+        'Miz Lucas and Doctor Jones left.',
+      ]);
+    });
+
+    test('only whole words change, in any case', () {
+      final rules = Pronunciations(const [
+        Pronunciation('majestic', 'beautiful'),
+        Pronunciation('Mr.', 'Mister'),
+      ]);
+      expect(
+        rules.apply('Majestic hills, unmajestic MAJESTIC. Mrs. Mr.'),
+        'beautiful hills, unmajestic beautiful. Mrs. Mister',
+      );
+    });
+
+    test('one rule never rewrites another rule\'s output', () {
+      final rules = Pronunciations(const [
+        Pronunciation('cat', 'dog'),
+        Pronunciation('dog', 'cat'),
+      ]);
+      expect(rules.apply('cat and dog'), 'dog and cat');
+    });
+
+    test('incomplete rules are ignored', () {
+      final rules = Pronunciations(const [
+        Pronunciation('word', ''),
+        Pronunciation('', 'word'),
+      ]);
+      expect(rules.apply('a word'), 'a word');
+    });
+
+    test('rules survive saving', () {
+      const rule = Pronunciation('majestic', 'beautiful');
+      final copy = Pronunciation.fromJson(rule.toJson())!;
+      expect((copy.written, copy.spoken), ('majestic', 'beautiful'));
     });
   });
 }
