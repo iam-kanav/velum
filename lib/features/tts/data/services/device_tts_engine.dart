@@ -19,6 +19,11 @@ class DeviceTtsEngine extends TtsEngine {
   /// so late completion events from a stopped utterance are ignored.
   bool _awaitingCompletion = false;
 
+  /// Whether the awaited utterance has started (or resumed). A Mac reports
+  /// a stopped utterance as finished, late enough that the event would
+  /// otherwise count as the next utterance finishing.
+  bool _utteranceStarted = false;
+
   static const _knownEngines = <String, String>{
     'com.google.android.tts': 'Speech Services by Google',
     'com.samsung.SMT': 'Samsung text-to-speech',
@@ -46,9 +51,13 @@ class DeviceTtsEngine extends TtsEngine {
     if (_initialized) return;
     _initialized = true;
 
-    _tts.setStartHandler(() => onStart?.call());
+    _tts.setStartHandler(() {
+      _utteranceStarted = true;
+      onStart?.call();
+    });
+    _tts.setContinueHandler(() => _utteranceStarted = true);
     _tts.setCompletionHandler(() {
-      if (!_awaitingCompletion) return;
+      if (!_awaitingCompletion || !_utteranceStarted) return;
       _awaitingCompletion = false;
       onComplete?.call();
     });
@@ -77,7 +86,8 @@ class DeviceTtsEngine extends TtsEngine {
       final byName = <String, Map<String, dynamic>>{};
       for (final v in (raw as List? ?? const [])) {
         final map = Map<String, dynamic>.from(v as Map);
-        final name = map['name']?.toString();
+        // Mac voice names repeat across languages; identifiers don't.
+        final name = (map['identifier'] ?? map['name'])?.toString();
         if (name == null || map['locale'] == null) continue;
         // Skip voices that still need downloading.
         if ((map['features']?.toString() ?? '').contains('notInstalled')) {
@@ -97,7 +107,9 @@ class DeviceTtsEngine extends TtsEngine {
         voices.add(
           TtsVoice(
             id: name,
-            label: _voiceLabel(name, map['network_required'] == '1'),
+            label: Platform.isMacOS
+                ? _macVoiceLabel(map)
+                : _voiceLabel(name, map['network_required'] == '1'),
             locale: TtsEngine.normaliseLocale(map['locale'].toString()),
           ),
         );
@@ -127,6 +139,16 @@ class DeviceTtsEngine extends TtsEngine {
     return online ? '$label (online)' : label;
   }
 
+  /// 'Ava' + 'premium' → 'Ava (Premium)'; standard voices keep their name.
+  static String _macVoiceLabel(Map<String, dynamic> voice) {
+    final name = voice['name'].toString();
+    return switch (voice['quality']) {
+      'premium' => '$name (Premium)',
+      'enhanced' => '$name (Enhanced)',
+      _ => name,
+    };
+  }
+
   @override
   Future<void> applySettings(TtsSettings settings) async {
     final wanted = settings.deviceEngine ?? _defaultEngine;
@@ -139,9 +161,12 @@ class DeviceTtsEngine extends TtsEngine {
       await _loadVoices();
     }
 
-    // flutter_tts uses 0.5 as normal speed on both Android and iOS,
-    // which matches how speechRate is stored.
-    await _tts.setSpeechRate(settings.speechRate);
+    // flutter_tts uses 0.5 as normal speed on both Android and Apple
+    // platforms, which matches how speechRate is stored. Mac voices top out
+    // at 1.0.
+    await _tts.setSpeechRate(
+      Platform.isMacOS ? settings.speechRate.clamp(0.0, 1.0) : settings.speechRate,
+    );
     await _tts.setPitch(settings.pitch);
     await _tts.setVolume(settings.volume);
 
@@ -149,7 +174,11 @@ class DeviceTtsEngine extends TtsEngine {
         .where((v) => v.id == settings.deviceVoice)
         .firstOrNull;
     if (voice != null) {
-      await _tts.setVoice({'name': voice.id, 'locale': voice.locale});
+      await _tts.setVoice(
+        Platform.isMacOS
+            ? {'identifier': voice.id, 'name': '', 'locale': voice.locale}
+            : {'name': voice.id, 'locale': voice.locale},
+      );
     } else {
       await _tts.setLanguage(settings.language);
     }
@@ -158,6 +187,7 @@ class DeviceTtsEngine extends TtsEngine {
   @override
   Future<void> speak(String text) async {
     if (text.isEmpty) return;
+    _utteranceStarted = false;
     _awaitingCompletion = true;
     final result = await _tts.speak(text);
     if (result != 1 && _awaitingCompletion) {
@@ -175,9 +205,14 @@ class DeviceTtsEngine extends TtsEngine {
   /// Pause mid-utterance. Speaking the same text again continues from the
   /// word where it paused (flutter_tts tracks the position on Android 8+;
   /// older versions restart the chunk).
+  ///
+  /// A Mac stops instead and restarts the chunk: its synthesizer resumes a
+  /// paused utterance whatever is spoken next, and can get stuck when a
+  /// paused utterance is stopped.
   @override
   Future<void> pause() async {
     _awaitingCompletion = false;
+    if (Platform.isMacOS) return _tts.stop();
     await _tts.pause();
   }
 }

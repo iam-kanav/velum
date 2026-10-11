@@ -6,11 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive/hive.dart';
 import 'package:epubx/epubx.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 import '../models/scanned_book.dart';
 import '../../../notes/data/note_service.dart';
+import '../../../../core/storage/app_directory.dart';
 
 /// Top-level function for compute() — parses EPUB bytes in a background isolate.
 /// Must be top-level (not a method) so Dart can send it to the isolate.
@@ -152,9 +152,8 @@ class LibraryService {
     final deletedPaths = _getDeletedPaths();
 
     try {
-      // Common Android storage root
-      final rootDir = Directory('/storage/emulated/0');
-      if (!await rootDir.exists()) {
+      final roots = _scanRoots();
+      if (!roots.any((dir) => dir.existsSync())) {
         debugPrint('Storage root not found');
         return existingBooks;
       }
@@ -167,16 +166,20 @@ class LibraryService {
         'cache',
         '.trash',
         'LOST.DIR',
+        'node_modules',
       };
 
-      await _scanDirectory(
-        rootDir,
-        foundBooks,
-        existingPaths,
-        deletedPaths,
-        skipDirs,
-        onProgress,
-      );
+      for (final rootDir in roots) {
+        if (!await rootDir.exists()) continue;
+        await _scanDirectory(
+          rootDir,
+          foundBooks,
+          existingPaths,
+          deletedPaths,
+          skipDirs,
+          onProgress,
+        );
+      }
     } catch (e) {
       debugPrint('Error scanning device: $e');
     }
@@ -194,6 +197,23 @@ class LibraryService {
     }
 
     return getSavedBooks();
+  }
+
+  /// Where a scan looks: all of shared storage on Android; on a Mac, the
+  /// folders books usually end up in (scanning the whole home folder would
+  /// crawl through Library and every project folder).
+  List<Directory> _scanRoots() {
+    if (Platform.isMacOS) {
+      final home = Platform.environment['HOME'] ?? '';
+      return [
+        'Documents',
+        'Downloads',
+        'Desktop',
+        'Books',
+        'Library/Mobile Documents/com~apple~CloudDocs', // iCloud Drive
+      ].map((dir) => Directory(p.join(home, dir))).toList();
+    }
+    return [Directory('/storage/emulated/0')];
   }
 
   Future<void> _scanDirectory(
@@ -274,7 +294,7 @@ class LibraryService {
 
       // Copy picked files to a persistent app directory with unique names
       // so multiple versions of the same book don't overwrite each other.
-      final appDir = await getApplicationDocumentsDirectory();
+      final appDir = await getAppDataDirectory();
       final booksDir = Directory(p.join(appDir.path, 'books'));
       if (!await booksDir.exists()) {
         await booksDir.create(recursive: true);
@@ -336,7 +356,7 @@ class LibraryService {
   Future<List<String>> removeMissingBooks() async {
     // Without storage access, files in shared storage can't be seen and would
     // all look missing; only check the app's own copies then.
-    final appDir = (await getApplicationDocumentsDirectory()).path;
+    final appDir = (await getAppDataDirectory()).path;
     final canSeeShared = await hasStoragePermission();
     final missing = <String>[];
     for (final path in _booksBox.keys.cast<String>().toList()) {
@@ -385,7 +405,7 @@ class LibraryService {
       return true;
     }
 
-    final appDir = await getApplicationDocumentsDirectory();
+    final appDir = await getAppDataDirectory();
     final appCopy = filePath.startsWith(p.join(appDir.path, 'books'));
     if (!appCopy && !deleteFile) {
       // Kept on the device: don't let the next scan add it back.

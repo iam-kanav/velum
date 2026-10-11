@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:go_router/go_router.dart';
@@ -45,13 +46,22 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       }
     }
 
-    if (_currentPage < 3) {
+    if (_currentPage < _pages.length - 1) {
       _pageController.nextPage(
         duration: const Duration(milliseconds: 300),
         curve: Curves.easeInOut,
       );
     }
   }
+
+  // A Mac shows reading-aloud controls in Control Center without asking,
+  // so there's no notifications step.
+  late final List<Widget> _pages = [
+    _WelcomePage(onNext: _nextPage),
+    _LibrarySetupPage(onNext: _nextPage),
+    if (Platform.isAndroid) _NotificationSetupPage(onNext: _nextPage),
+    _ThemeSetupPage(onFinish: _finishOnboarding),
+  ];
 
   void _finishOnboarding() async {
     final libraryNotifier = context.read<LibraryNotifier>();
@@ -78,12 +88,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 onPageChanged: (index) {
                   setState(() => _currentPage = index);
                 },
-                children: [
-                  _WelcomePage(onNext: _nextPage),
-                  _LibrarySetupPage(onNext: _nextPage),
-                  _NotificationSetupPage(onNext: _nextPage),
-                  _ThemeSetupPage(onFinish: _finishOnboarding),
-                ],
+                children: _pages,
               ),
             ),
             // Page indicator
@@ -91,7 +96,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               padding: const EdgeInsets.all(24),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(4, (index) {
+                children: List.generate(_pages.length, (index) {
                   return AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
                     margin: const EdgeInsets.symmetric(horizontal: 4),

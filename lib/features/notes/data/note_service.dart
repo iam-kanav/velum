@@ -3,9 +3,9 @@ import 'dart:io';
 import 'package:archive/archive.dart';
 import 'package:html/parser.dart' as html_parser;
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:uuid/uuid.dart';
+import '../../../core/storage/app_directory.dart';
 
 /// A text the user typed or pasted into Velum ("New File").
 class Note {
@@ -29,7 +29,7 @@ class NoteService {
 
   Future<Directory> _dir() async {
     final dir = Directory(
-      p.join((await getApplicationDocumentsDirectory()).path, 'notes'),
+      p.join((await getAppDataDirectory()).path, 'notes'),
     );
     if (!await dir.exists()) await dir.create(recursive: true);
     return dir;

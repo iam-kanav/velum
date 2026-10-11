@@ -533,9 +533,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _initController() {
-    _controller = WebViewController()
+    _controller = WebViewController();
+    // The Mac WebView can't change its background; the page paints its own.
+    if (!Platform.isMacOS) {
+      _controller.setBackgroundColor(const Color(0x00000000));
+    }
+    _controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0x00000000))
       ..addJavaScriptChannel(
         'ReaderChannel',
         onMessageReceived: (JavaScriptMessage message) {
@@ -1250,12 +1254,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  /// Open a URL in the device's external browser via Android Intent.
+  /// Open a URL in the default browser (an Android intent, or `open` on Mac).
   void _openExternalUrl(String url) {
     if (Platform.isAndroid) {
       Process.run('am', ['start', '-a', 'android.intent.action.VIEW', '-d', url]);
+    } else if (Platform.isMacOS) {
+      Process.run('open', [url]);
     }
-    // iOS: use canLaunchUrl / system channel if needed in the future
   }
 
   void _navigateToHighlight(Highlight highlight, ReaderNotifier notifier) {

@@ -10,6 +10,7 @@ Open a book, press play, and follow along as each sentence lights up.
 
 ![Flutter](https://img.shields.io/badge/Flutter-3.44-02569B?logo=flutter&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-10.15%2B-000000?logo=apple&logoColor=white)
 ![License](https://img.shields.io/badge/license-Apache%202.0-5B3DE3)
 
 <a href="https://github.com/iam-kanav/velum/releases/latest"><img src="https://img.shields.io/badge/Download-APK-5B3DE3?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" /></a>
@@ -57,7 +58,7 @@ Grab the latest APK from [**Releases**](https://github.com/iam-kanav/velum/relea
 
 ## 🚀 Getting started
 
-**Requirements:** [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ and an Android device or emulator (Android 7.0+).
+**Requirements:** [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ and an Android device or emulator (Android 7.0+). For the Mac app: Xcode and [CocoaPods](https://cocoapods.org) (`brew install cocoapods`).
 
 ```bash
 git clone https://github.com/iam-kanav/velum.git
@@ -71,6 +72,15 @@ Build a release APK (one per CPU type; most phones use `arm64-v8a`):
 ```bash
 flutter build apk --release --split-per-abi
 ```
+
+Run or build the Mac app (it lands in `build/macos/Build/Products/Release/Velum.app`):
+
+```bash
+flutter run -d macos
+flutter build macos --release
+```
+
+On a Mac, Velum reads aloud with the voices in System Settings → Accessibility → Spoken Content (download Enhanced or Premium voices there for the best sound), or with Edge neural voices. Auto-detect looks for EPUBs in Documents, Downloads, Desktop, Books and iCloud Drive.
 
 Run the tests:
 

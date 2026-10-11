@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:go_router/go_router.dart';
 import 'package:audio_service/audio_service.dart';
 import 'core/router/app_router.dart';
+import 'core/storage/app_directory.dart';
 import 'core/theme/app_theme.dart';
 
 import 'package:hive_flutter/hive_flutter.dart';
@@ -33,7 +34,7 @@ void main() async {
   final prefs = await SharedPreferences.getInstance();
 
   // Initialize Hive
-  await Hive.initFlutter();
+  Hive.init((await getAppDataDirectory()).path);
   Hive.registerAdapter(ScannedBookAdapter());
   final booksBox = await Hive.openBox<ScannedBook>('books_box');
 

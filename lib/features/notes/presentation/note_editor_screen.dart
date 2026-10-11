@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -36,9 +37,11 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   void initState() {
     super.initState();
     final theme = context.read<SettingsNotifier>().settings.readerTheme;
-    _controller = WebViewController()
+    _controller = WebViewController();
+    // The Mac WebView can't change its background; the page paints its own.
+    if (!Platform.isMacOS) _controller.setBackgroundColor(theme.backgroundColor);
+    _controller
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(theme.backgroundColor)
       ..addJavaScriptChannel('Editor', onMessageReceived: _onMessage)
       ..setNavigationDelegate(
         NavigationDelegate(

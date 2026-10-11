@@ -4,11 +4,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:uuid/uuid.dart';
 import '../../data/models/reader_settings.dart';
 import '../../data/models/custom_font.dart';
+import '../../../../core/storage/app_directory.dart';
 
 class SettingsNotifier extends ChangeNotifier {
   static const String _appThemeKey = 'app_theme';
@@ -141,7 +141,7 @@ class SettingsNotifier extends ChangeNotifier {
 
       if (result != null && result.files.single.path != null) {
         final sourceFile = File(result.files.single.path!);
-        final appDir = await getApplicationDocumentsDirectory();
+        final appDir = await getAppDataDirectory();
 
         // Use UUID for unique filename to prevent collisions
         final id = const Uuid().v4();
