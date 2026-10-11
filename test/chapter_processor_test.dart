@@ -160,6 +160,11 @@ void main() {
       expect(paras.map((p) => p.text), ['Before', 'Inside.', 'After']);
     });
 
+    test('a body with no blocks at all is read', () {
+      final paras = processAndCheck('Hello there. Mr. <b>Smith</b> left.');
+      expect(paras.map((p) => p.text), ['Hello there. Mr. Smith left.']);
+    });
+
     test('table cells are read', () {
       final paras = processAndCheck(
         '<table><tr><td>Cell one.</td><td>Cell two.</td></tr></table>',

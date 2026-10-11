@@ -67,13 +67,14 @@ class ChapterProcessor {
   }
 
   /// Text sitting directly next to block elements (e.g. `<div>Intro<p>…</p>
-  /// More</div>`) belongs to no leaf block and would never be read. Wrap each
-  /// such run of inline content in its own div, which the browser lays out
-  /// the same way (as an anonymous block).
+  /// More</div>`), or in a body with no blocks at all (a note typed as one
+  /// line), belongs to no leaf block and would never be read. Wrap each such
+  /// run of inline content in its own div, which the browser lays out the
+  /// same way (as an anonymous block).
   static void _wrapLooseText(dom.Element body) {
     final blocks = body.querySelectorAll(blockSelector);
-    if (blocks.isEmpty) return;
-    final containers = _blockAncestors(blocks, body);
+    final containers =
+        blocks.isEmpty ? {body} : _blockAncestors(blocks, body);
     final structural = {...blocks, ...containers};
 
     for (final container in containers) {

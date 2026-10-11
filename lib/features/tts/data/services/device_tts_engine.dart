@@ -24,6 +24,11 @@ class DeviceTtsEngine extends TtsEngine {
   /// otherwise count as the next utterance finishing.
   bool _utteranceStarted = false;
 
+  /// Paused and not yet spoken again or stopped. On Android, pausing twice
+  /// makes flutter_tts cut the remaining text at the old position again,
+  /// which throws once that's past its end.
+  bool _paused = false;
+
   static const _knownEngines = <String, String>{
     'com.google.android.tts': 'Speech Services by Google',
     'com.samsung.SMT': 'Samsung text-to-speech',
@@ -187,6 +192,7 @@ class DeviceTtsEngine extends TtsEngine {
   @override
   Future<void> speak(String text) async {
     if (text.isEmpty) return;
+    _paused = false;
     _utteranceStarted = false;
     _awaitingCompletion = true;
     final result = await _tts.speak(text);
@@ -199,6 +205,7 @@ class DeviceTtsEngine extends TtsEngine {
   @override
   Future<void> stop() async {
     _awaitingCompletion = false;
+    _paused = false;
     await _tts.stop();
   }
 
@@ -213,6 +220,13 @@ class DeviceTtsEngine extends TtsEngine {
   Future<void> pause() async {
     _awaitingCompletion = false;
     if (Platform.isMacOS) return _tts.stop();
-    await _tts.pause();
+    if (_paused) return;
+    _paused = true;
+    try {
+      await _tts.pause();
+    } catch (e) {
+      debugPrint('Pausing speech failed, stopping instead: $e');
+      await _tts.stop();
+    }
   }
 }
