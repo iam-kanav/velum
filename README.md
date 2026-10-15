@@ -33,6 +33,7 @@ Open a book, press play, and follow along as each sentence lights up.
 - 🔊 **Read-aloud with live highlighting.** Uses your phone's own voice, works offline, and highlights each sentence as it's spoken. Want something more natural? Turn on **neural voices** (Microsoft Edge, online) in the voice settings.
 - 🎨 **Themes.** Light, dark and sepia, plus your choice of font, size, spacing and margins.
 - 🗂️ **Collections.** Group books into collections like "Classics" or "To read", and optionally keep them out of your main library.
+- 📋 **Listen to your clipboard.** Turn on a notification that stays in your shade (Settings → Shortcuts). Tap it and whatever you last copied is saved as a note and read aloud, without leaving the app you're in.
 - 🖍️ **Highlights and bookmarks.** Highlight passages in five colours and bookmark your exact spot, all browsable from one panel.
 
 ## 📱 Screenshots

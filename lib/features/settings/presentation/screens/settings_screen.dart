@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
 import 'package:velum/features/library/presentation/providers/library_notifier.dart';
 import 'package:velum/core/theme/app_colors.dart';
+import 'package:velum/features/notes/data/clipboard_listen.dart';
 
 const Color _accent = AppColors.accent;
 
@@ -79,6 +81,16 @@ class SettingsScreen extends StatelessWidget {
           _buildLibrarySettingsCard(context, appTheme),
 
           const SizedBox(height: 32),
+
+          if (ClipboardListen.isSupported) ...[
+            _buildSectionHeader('Shortcuts', appTheme),
+            const SizedBox(height: 16),
+            _buildSettingsCard(
+              appTheme,
+              child: _ClipboardListenSetting(theme: appTheme),
+            ),
+            const SizedBox(height: 32),
+          ],
 
           // ═══════════════════════════════════════════════════════════════
           // READER SETTINGS
@@ -676,5 +688,88 @@ class SettingsScreen extends StatelessWidget {
       case ReaderTheme.light:
         return Colors.white;
     }
+  }
+}
+
+/// Turns the "Listen to clipboard" notification on or off.
+class _ClipboardListenSetting extends StatefulWidget {
+  final ReaderTheme theme;
+
+  const _ClipboardListenSetting({required this.theme});
+
+  @override
+  State<_ClipboardListenSetting> createState() =>
+      _ClipboardListenSettingState();
+}
+
+class _ClipboardListenSettingState extends State<_ClipboardListenSetting> {
+  bool _enabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    ClipboardListen.isEnabled().then((enabled) {
+      if (mounted) setState(() => _enabled = enabled);
+    });
+  }
+
+  Future<void> _set(bool enabled) async {
+    if (enabled && !await Permission.notification.request().isGranted) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Allow notifications to use this shortcut'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+    await ClipboardListen.setEnabled(enabled);
+    if (mounted) setState(() => _enabled = enabled);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = widget.theme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Listen to Clipboard',
+          style: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: theme.textColor,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Keeps a notification in your shade. Tap it to save what you last '
+          'copied as a note and hear it read aloud, without leaving the app '
+          "you're in.",
+          style: TextStyle(fontSize: 12, color: theme.textColor.withAlpha(150)),
+        ),
+        const SizedBox(height: 16),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Show notification',
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+                color: theme.textColor.withAlpha(200),
+              ),
+            ),
+            Switch(
+              value: _enabled,
+              activeThumbColor: _accent,
+              onChanged: _set,
+            ),
+          ],
+        ),
+      ],
+    );
   }
 }

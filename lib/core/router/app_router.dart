@@ -58,35 +58,45 @@ GoRouter createAppRouter(LibraryNotifier libraryNotifier) {
         path: '/onboarding',
         builder: (context, state) => const OnboardingScreen(),
       ),
-      GoRoute(path: '/', builder: (context, state) => const LibraryScreen()),
+      // The reader sits on the library, so going straight to a book (the
+      // "Listen to clipboard" notification) still goes back to the library.
       GoRoute(
-        path: '/reader',
-        builder: (context, state) {
-          final path = state.uri.queryParameters['path'];
-          if (path == null || path.isEmpty) {
-            // Fallback to library if no path provided
-            return const LibraryScreen();
-          }
-          return MultiProvider(
-            providers: [
-              ChangeNotifierProvider(
-                create: (context) => ReaderNotifier(
-                  context.read<EpubService>(),
-                  context.read<LibraryService>(),
-                ),
-              ),
-              ChangeNotifierProvider(
-                create: (context) =>
-                    HighlightNotifier(context.read<HighlightService>()),
-              ),
-              ChangeNotifierProvider(
-                create: (context) =>
-                    BookmarkNotifier(context.read<BookmarkService>()),
-              ),
-            ],
-            child: ReaderScreen(assetPath: path),
-          );
-        },
+        path: '/',
+        builder: (context, state) => const LibraryScreen(),
+        routes: [
+          GoRoute(
+            path: 'reader',
+            builder: (context, state) {
+              final path = state.uri.queryParameters['path'];
+              if (path == null || path.isEmpty) {
+                // Fallback to library if no path provided
+                return const LibraryScreen();
+              }
+              return MultiProvider(
+                // Opening another book from a book ("Listen to clipboard")
+                // must start a fresh reader, not reuse this one.
+                key: ValueKey(path),
+                providers: [
+                  ChangeNotifierProvider(
+                    create: (context) => ReaderNotifier(
+                      context.read<EpubService>(),
+                      context.read<LibraryService>(),
+                    ),
+                  ),
+                  ChangeNotifierProvider(
+                    create: (context) =>
+                        HighlightNotifier(context.read<HighlightService>()),
+                  ),
+                  ChangeNotifierProvider(
+                    create: (context) =>
+                        BookmarkNotifier(context.read<BookmarkService>()),
+                  ),
+                ],
+                child: ReaderScreen(assetPath: path),
+              );
+            },
+          ),
+        ],
       ),
       GoRoute(
         path: '/editor',

@@ -23,6 +23,7 @@ import 'features/tts/data/services/velum_audio_handler.dart';
 import 'features/tts/presentation/providers/tts_notifier.dart';
 
 import 'features/library/data/services/collection_service.dart';
+import 'features/notes/data/clipboard_listen.dart';
 
 late VelumAudioHandler audioHandler;
 
@@ -56,12 +57,38 @@ void main() async {
     ),
   );
 
+  // Made here rather than by the widget tree: a "Listen to clipboard" tap
+  // can start the app in the background, with no screen to build them.
+  final libraryNotifier = LibraryNotifier(
+    libraryService,
+    CollectionService(prefs),
+  );
+  final deviceTts = DeviceTtsEngine();
+  final edgeTts = EdgeTtsEngine();
+  // App-wide, so reading aloud carries on in the library and while another
+  // book is open.
+  final ttsNotifier = TtsNotifier(deviceTts, edgeTts, prefs);
+  final ttsReady = ttsNotifier.init();
+  audioHandler.attachNotifier(ttsNotifier);
+  final router = createAppRouter(libraryNotifier);
+  ClipboardListen(
+    libraryNotifier,
+    ttsNotifier,
+    ttsReady,
+    (path) => router.go('/reader?path=${Uri.encodeComponent(path)}'),
+  ).start();
+
   runApp(
     MainApp(
       prefs: prefs,
       libraryService: libraryService,
       highlightService: highlightService,
       bookmarkService: bookmarkService,
+      libraryNotifier: libraryNotifier,
+      deviceTts: deviceTts,
+      edgeTts: edgeTts,
+      ttsNotifier: ttsNotifier,
+      router: router,
     ),
   );
 }
@@ -71,6 +98,11 @@ class MainApp extends StatelessWidget {
   final LibraryService libraryService;
   final HighlightService highlightService;
   final BookmarkService bookmarkService;
+  final LibraryNotifier libraryNotifier;
+  final DeviceTtsEngine deviceTts;
+  final EdgeTtsEngine edgeTts;
+  final TtsNotifier ttsNotifier;
+  final GoRouter router;
 
   const MainApp({
     super.key,
@@ -78,6 +110,11 @@ class MainApp extends StatelessWidget {
     required this.libraryService,
     required this.highlightService,
     required this.bookmarkService,
+    required this.libraryNotifier,
+    required this.deviceTts,
+    required this.edgeTts,
+    required this.ttsNotifier,
+    required this.router,
   });
 
   @override
@@ -88,56 +125,26 @@ class MainApp extends StatelessWidget {
         Provider.value(value: libraryService),
         Provider.value(value: highlightService),
         Provider.value(value: bookmarkService),
-        Provider(create: (_) => DeviceTtsEngine()),
-        Provider(create: (_) => EdgeTtsEngine()),
+        Provider.value(value: deviceTts),
+        Provider.value(value: edgeTts),
         Provider.value(value: prefs),
         ChangeNotifierProvider(
           create: (context) =>
               SettingsNotifier(context.read<SharedPreferences>()),
         ),
-        ChangeNotifierProvider(
-          create: (context) => LibraryNotifier(
-            context.read<LibraryService>(),
-            CollectionService(context.read<SharedPreferences>()),
-          ),
-        ),
+        ChangeNotifierProvider.value(value: libraryNotifier),
         Provider<VelumAudioHandler>.value(value: audioHandler),
-        // App-wide, so reading aloud carries on in the library and while
-        // another book is open.
-        ChangeNotifierProvider(
-          create: (context) {
-            final ttsNotifier = TtsNotifier(
-              context.read<DeviceTtsEngine>(),
-              context.read<EdgeTtsEngine>(),
-              context.read<SharedPreferences>(),
-            )..init();
-            audioHandler.attachNotifier(ttsNotifier);
-            return ttsNotifier;
-          },
-        ),
+        ChangeNotifierProvider.value(value: ttsNotifier),
       ],
-      child: const VelumApp(),
+      child: VelumApp(router: router),
     );
   }
 }
 
-class VelumApp extends StatefulWidget {
-  const VelumApp({super.key});
+class VelumApp extends StatelessWidget {
+  final GoRouter router;
 
-  @override
-  State<VelumApp> createState() => _VelumAppState();
-}
-
-class _VelumAppState extends State<VelumApp> {
-  late final GoRouter _router;
-
-  @override
-  void initState() {
-    super.initState();
-    // Initialize router once to prevent recreation on rebuilds
-    final libraryNotifier = context.read<LibraryNotifier>();
-    _router = createAppRouter(libraryNotifier);
-  }
+  const VelumApp({super.key, required this.router});
 
   @override
   Widget build(BuildContext context) {
@@ -154,7 +161,7 @@ class _VelumAppState extends State<VelumApp> {
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,
-      routerConfig: _router,
+      routerConfig: router,
       debugShowCheckedModeBanner: false,
     );
   }
