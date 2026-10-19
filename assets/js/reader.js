@@ -16,170 +16,60 @@ var lastTapTime = 0;
 var lastTapTarget = null;
 var tapTimeout = null;
 
-// Chapter pull: drag sideways to change chapter. A pill slides in from the
-// edge being pulled away from and fills in once the pull is far enough;
-// letting go then changes chapter, and dragging back first cancels. A scroll
-// whose path curves sideways, a pinch or a text selection never counts.
+// Swipe detection: a deliberate sideways swipe changes chapter, but a scroll
+// whose path curves sideways must not.
 var touchStartX = 0;
 var touchStartY = 0;
+var touchStartTime = 0;
 var touchStartScroll = 0;
 var swipeAxis = null; // 'x' or 'y', decided once the finger has moved a bit
 var swipeCancelled = false;
-var pullSide = null; // 'prev' or 'next' while the pill is showing
-var pullArmed = false;
-
-// Which pulls lead anywhere; Flutter sets this after each chapter loads.
-var chapterNav = { prev: true, next: true, lastChapter: false };
-window.setChapterNav = function(prev, next, lastChapter) {
-  chapterNav = { prev: prev, next: next, lastChapter: lastChapter };
-};
-
-// About a fifth of the screen width, 64-120px.
-function pullDistance() {
-  return Math.min(120, Math.max(64, window.innerWidth * 0.2));
-}
-
-var pullPill = null, pullArrow = null, pullLabel = null;
-function getPullPill() {
-  if (pullPill) return pullPill;
-  // The page's `* { color; background-color: transparent }` rules are
-  // !important, so these use an id selector to win.
-  var style = document.createElement('style');
-  style.textContent =
-    '#velum-pull { position: fixed !important; z-index: 2147483647 !important;' +
-    ' display: flex !important; align-items: center !important;' +
-    ' height: 44px !important; padding: 0 12px !important;' +
-    ' border-radius: 22px !important; pointer-events: none !important;' +
-    ' box-sizing: border-box !important; opacity: 0;' +
-    ' font: 600 14px/1 -apple-system, Roboto, sans-serif !important;' +
-    ' white-space: nowrap !important;' +
-    ' transition: background-color 120ms, color 120ms; }' +
-    '#velum-pull * { color: inherit !important; }' +
-    '#velum-pull svg { flex: none !important; }' +
-    '#velum-pull span { display: inline-block !important; overflow: hidden !important;' +
-    ' max-width: 0; transition: max-width 160ms ease-out, margin 160ms ease-out; }' +
-    '#velum-pull.armed span { max-width: 160px; margin: 0 4px; }';
-  document.head.appendChild(style);
-
-  pullPill = document.createElement('div');
-  pullPill.id = 'velum-pull';
-  pullArrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  pullArrow.setAttribute('viewBox', '0 0 24 24');
-  pullArrow.setAttribute('width', '20');
-  pullArrow.setAttribute('height', '20');
-  pullLabel = document.createElement('span');
-  // On <html>, not <body>: the body has a transform, which would make a
-  // fixed element scroll with the page.
-  document.documentElement.appendChild(pullPill);
-  return pullPill;
-}
-
-function rgba(color, alpha) {
-  var m = color.match(/[\d.]+/g);
-  return m ? 'rgba(' + m[0] + ',' + m[1] + ',' + m[2] + ',' + alpha + ')' : color;
-}
-
-function paintPull() {
-  var fg = getComputedStyle(document.body).color;
-  var bg = getComputedStyle(document.documentElement).backgroundColor;
-  // A solid bubble in the page colours while pulling, filled in with the
-  // text colour once letting go would change chapter.
-  pullPill.style.setProperty('background-color', pullArmed ? fg : bg, 'important');
-  pullPill.style.setProperty('color', pullArmed ? bg : fg, 'important');
-  pullPill.style.boxShadow = '0 2px 12px rgba(0,0,0,0.22), inset 0 0 0 1px ' + rgba(fg, 0.16);
-  pullPill.classList.toggle('armed', pullArmed);
-}
-
-function showPull(side, dx, y) {
-  var pill = getPullPill();
-  if (side !== pullSide) {
-    pullSide = side;
-    var left = side === 'prev';
-    pullArrow.innerHTML = '<path d="' + (left ? 'M15 5l-7 7 7 7' : 'M9 5l7 7-7 7') +
-      '" fill="none" stroke="currentColor" stroke-width="2.6"' +
-      ' stroke-linecap="round" stroke-linejoin="round"/>';
-    pullLabel.textContent = left ? 'Previous chapter'
-      : (chapterNav.lastChapter ? 'Finish book' : 'Next chapter');
-    // The label sits on the side away from the edge.
-    pill.textContent = '';
-    if (left) { pill.appendChild(pullArrow); pill.appendChild(pullLabel); }
-    else { pill.appendChild(pullLabel); pill.appendChild(pullArrow); }
-    pill.style.left = left ? '12px' : 'auto';
-    pill.style.right = left ? 'auto' : '12px';
-    pullArmed = false;
-    paintPull();
-  }
-  // Follow the finger in from the edge until the pull is far enough.
-  var p = Math.min(1, Math.abs(dx) / pullDistance());
-  pill.style.transition = 'background-color 120ms, color 120ms';
-  pill.style.top = Math.max(16, Math.min(window.innerHeight - 60, y - 22)) + 'px';
-  pill.style.opacity = String(Math.min(1, p * 1.6));
-  pill.style.transform = 'translateX(' + ((1 - p) * (side === 'prev' ? -40 : 40)) +
-    'px) scale(' + (0.7 + 0.3 * p) + ')';
-}
-
-function hidePull() {
-  if (!pullPill || !pullSide) return;
-  pullPill.style.transition = 'opacity 160ms, transform 160ms';
-  pullPill.style.opacity = '0';
-  pullPill.style.transform = 'translateX(' + (pullSide === 'prev' ? -40 : 40) + 'px) scale(0.7)';
-  pullSide = null;
-  pullArmed = false;
-}
 
 document.addEventListener('touchstart', function(e) {
-  // A second finger (pinch) rules out a pull for the whole gesture.
-  if (e.touches.length > 1) { swipeCancelled = true; hidePull(); return; }
+  // A second finger (pinch) rules out a swipe for the whole gesture.
+  if (e.touches.length > 1) { swipeCancelled = true; return; }
   touchStartX = e.touches[0].clientX;
   touchStartY = e.touches[0].clientY;
+  touchStartTime = Date.now();
   touchStartScroll = window.scrollY;
   swipeAxis = null;
   swipeCancelled = false;
 }, { passive: true });
 
-// Not passive: once a touch is a sideways pull, the page is held still.
 document.addEventListener('touchmove', function(e) {
-  if (swipeCancelled || e.touches.length > 1) return;
-  var dx = e.touches[0].clientX - touchStartX;
-  var dy = e.touches[0].clientY - touchStartY;
+  if (swipeAxis || e.touches.length > 1) return;
+  var dx = Math.abs(e.touches[0].clientX - touchStartX);
+  var dy = Math.abs(e.touches[0].clientY - touchStartY);
   // Lock the direction early: unless the start is clearly sideways, this
   // touch is a scroll however far it drifts sideways later.
-  if (!swipeAxis && (Math.abs(dx) > 12 || Math.abs(dy) > 12)) {
-    swipeAxis = Math.abs(dx) > 2 * Math.abs(dy) ? 'x' : 'y';
-  }
-  if (swipeAxis !== 'x') return;
-  // Dragging to select text isn't a pull.
-  if (window.getSelection().toString().length > 0) {
-    swipeCancelled = true;
-    hidePull();
-    return;
-  }
-  if (e.cancelable) e.preventDefault();
-
-  var side = dx > 0 ? 'prev' : 'next';
-  if (!chapterNav[side]) { hidePull(); return; }
-  showPull(side, dx, e.touches[0].clientY);
-  var armed = Math.abs(dx) >= pullDistance() && Math.abs(dx) > 1.5 * Math.abs(dy);
-  if (armed !== pullArmed) {
-    pullArmed = armed;
-    paintPull();
-    if (armed) ReaderChannel.postMessage('pull-armed');
-  }
-}, { passive: false });
-
-document.addEventListener('touchend', function(e) {
-  if (e.touches.length > 0) return;
-  var side = pullSide, armed = pullArmed;
-  hidePull();
-  if (swipeCancelled || swipeAxis !== 'x' || !armed) return;
-  // The page moved, so this was a scroll.
-  if (Math.abs(window.scrollY - touchStartScroll) > 10) return;
-  ReaderChannel.postMessage(side);
+  if (dx > 12 || dy > 12) swipeAxis = dx > 2 * dy ? 'x' : 'y';
 }, { passive: true });
 
-document.addEventListener('touchcancel', function() {
-  swipeCancelled = true;
-  hidePull();
+document.addEventListener('touchend', function(e) {
+  if (swipeCancelled || e.touches.length > 0 || swipeAxis !== 'x') return;
+  // The page moved, so this was a scroll.
+  if (Math.abs(window.scrollY - touchStartScroll) > 10) return;
+  // Dragging to select text isn't a swipe.
+  if (window.getSelection().toString().length > 0) return;
+
+  var deltaX = e.changedTouches[0].clientX - touchStartX;
+  var deltaY = e.changedTouches[0].clientY - touchStartY;
+  var deltaTime = Date.now() - touchStartTime;
+  // About a quarter of the screen width (80-150px), mostly sideways overall,
+  // and quick.
+  var minDistance = Math.min(150, Math.max(80, window.innerWidth * 0.25));
+
+  if (Math.abs(deltaX) > minDistance &&
+      Math.abs(deltaX) > 2 * Math.abs(deltaY) &&
+      deltaTime < 700) {
+    if (deltaX > 0) {
+      // Swipe right = previous chapter
+      ReaderChannel.postMessage('prev');
+    } else {
+      // Swipe left = next chapter
+      ReaderChannel.postMessage('next');
+    }
+  }
 }, { passive: true });
 
 // A tap between lines or beside the text lands on the paragraph itself; pick

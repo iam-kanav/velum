@@ -561,10 +561,6 @@ class _ReaderScreenState extends State<ReaderScreen>
                 _animatePageTurn(-1);
               }
               break;
-            case 'pull-armed':
-              // A chapter pull is far enough; letting go now changes chapter.
-              HapticFeedback.selectionClick();
-              break;
             case 'prev':
               if (_isNote) break;
               HapticFeedback.mediumImpact();
@@ -652,16 +648,6 @@ class _ReaderScreenState extends State<ReaderScreen>
           onPageFinished: (String url) async {
             _readerJs ??= await rootBundle.loadString('assets/js/reader.js');
             await _controller.runJavaScript(_readerJs!);
-            if (!mounted) return;
-            // Which chapter pulls lead anywhere: none in a note, and no
-            // previous chapter from the first one.
-            final reader = context.read<ReaderNotifier>();
-            final index = reader.currentChapterIndex;
-            final count = reader.currentBook?.Chapters?.length ?? 0;
-            await _controller.runJavaScript(
-              'window.setChapterNav(${!_isNote && index > 0}, ${!_isNote}, '
-              '${index >= count - 1});',
-            );
 
             _isPageReady = true; // JS is now ready
             if (_followOff) setState(() => _followOff = false);
