@@ -59,5 +59,25 @@ Future<EpubBook> _readChaptersIsolate(Uint8List bytes) async {
     ..Title = bookRef.Title
     ..Author = bookRef.Author
     ..AuthorList = bookRef.AuthorList
-    ..Chapters = await EpubReader.readChapters(await bookRef.getChapters());
+    ..Chapters = flattenChapters(
+        await EpubReader.readChapters(await bookRef.getChapters()));
+}
+
+/// The reader works on a flat chapter list, but many EPUBs nest chapters
+/// under parts ("Book 1" > "Chapter 1", ...). Flatten them in reading order.
+/// A parent that only points at its first child's file (no content of its
+/// own) is dropped so that chapter isn't listed and read twice.
+@visibleForTesting
+List<EpubChapter> flattenChapters(List<EpubChapter> chapters) {
+  final flat = <EpubChapter>[];
+  for (final chapter in chapters) {
+    final children = chapter.SubChapters ?? const <EpubChapter>[];
+    final sameAsFirstChild = children.isNotEmpty &&
+        children.first.ContentFileName == chapter.ContentFileName &&
+        children.first.Anchor == chapter.Anchor;
+    if (!sameAsFirstChild) flat.add(chapter);
+    flat.addAll(flattenChapters(children));
+    chapter.SubChapters = [];
+  }
+  return flat;
 }
