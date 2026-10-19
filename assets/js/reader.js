@@ -16,27 +16,52 @@ var lastTapTime = 0;
 var lastTapTarget = null;
 var tapTimeout = null;
 
-// Swipe detection
+// Swipe detection: a deliberate sideways swipe changes chapter, but a scroll
+// whose path curves sideways must not.
 var touchStartX = 0;
 var touchStartY = 0;
 var touchStartTime = 0;
+var touchStartScroll = 0;
+var swipeAxis = null; // 'x' or 'y', decided once the finger has moved a bit
+var swipeCancelled = false;
 
 document.addEventListener('touchstart', function(e) {
+  // A second finger (pinch) rules out a swipe for the whole gesture.
+  if (e.touches.length > 1) { swipeCancelled = true; return; }
   touchStartX = e.touches[0].clientX;
   touchStartY = e.touches[0].clientY;
   touchStartTime = Date.now();
+  touchStartScroll = window.scrollY;
+  swipeAxis = null;
+  swipeCancelled = false;
+}, { passive: true });
+
+document.addEventListener('touchmove', function(e) {
+  if (swipeAxis || e.touches.length > 1) return;
+  var dx = Math.abs(e.touches[0].clientX - touchStartX);
+  var dy = Math.abs(e.touches[0].clientY - touchStartY);
+  // Lock the direction early: unless the start is clearly sideways, this
+  // touch is a scroll however far it drifts sideways later.
+  if (dx > 12 || dy > 12) swipeAxis = dx > 2 * dy ? 'x' : 'y';
 }, { passive: true });
 
 document.addEventListener('touchend', function(e) {
-  var touchEndX = e.changedTouches[0].clientX;
-  var touchEndY = e.changedTouches[0].clientY;
-  var deltaX = touchEndX - touchStartX;
-  var deltaY = touchEndY - touchStartY;
-  var deltaTime = Date.now() - touchStartTime;
+  if (swipeCancelled || e.touches.length > 0 || swipeAxis !== 'x') return;
+  // The page moved, so this was a scroll.
+  if (Math.abs(window.scrollY - touchStartScroll) > 10) return;
+  // Dragging to select text isn't a swipe.
+  if (window.getSelection().toString().length > 0) return;
 
-  // Only detect horizontal swipes (not vertical scrolling)
-  // Require: >50px horizontal, <150px vertical, <700ms duration
-  if (Math.abs(deltaX) > 50 && Math.abs(deltaY) < 150 && deltaTime < 700) {
+  var deltaX = e.changedTouches[0].clientX - touchStartX;
+  var deltaY = e.changedTouches[0].clientY - touchStartY;
+  var deltaTime = Date.now() - touchStartTime;
+  // About a quarter of the screen width (80-150px), mostly sideways overall,
+  // and quick.
+  var minDistance = Math.min(150, Math.max(80, window.innerWidth * 0.25));
+
+  if (Math.abs(deltaX) > minDistance &&
+      Math.abs(deltaX) > 2 * Math.abs(deltaY) &&
+      deltaTime < 700) {
     if (deltaX > 0) {
       // Swipe right = previous chapter
       ReaderChannel.postMessage('prev');
