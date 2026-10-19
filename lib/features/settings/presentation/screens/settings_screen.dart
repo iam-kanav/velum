@@ -185,6 +185,39 @@ class SettingsScreen extends StatelessWidget {
             ),
           ),
 
+          const SizedBox(height: 16),
+
+          // Chapter Swipe
+          _buildSettingsCard(
+            appTheme,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildCardTitle('Chapter Swipe', appTheme),
+                const SizedBox(height: 4),
+                Text(
+                  'How far to swipe sideways to change chapter. Shorter is '
+                  'easier; longer avoids changing chapter by accident.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: appTheme.textColor.withAlpha(150),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _buildSliderRow(
+                  'Swipe Distance',
+                  '${(settings.chapterSwipeDistance * 100).round()}% of screen',
+                  settings.chapterSwipeDistance,
+                  0.10,
+                  0.40,
+                  15,
+                  (val) => settingsNotifier.updateChapterSwipeDistance(val),
+                  appTheme,
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: 40),
         ],
       ),

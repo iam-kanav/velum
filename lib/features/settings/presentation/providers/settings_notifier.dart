@@ -21,6 +21,7 @@ class SettingsNotifier extends ChangeNotifier {
   static const String _paragraphSpacingKey = 'paragraph_spacing';
   static const String _textAlignmentKey = 'text_alignment';
   static const String _horizontalMarginKey = 'horizontal_margin';
+  static const String _chapterSwipeDistanceKey = 'chapter_swipe_distance';
 
   final SharedPreferences _prefs;
   ReaderSettings _settings = const ReaderSettings();
@@ -46,6 +47,8 @@ class SettingsNotifier extends ChangeNotifier {
     final paragraphSpacing = _prefs.getDouble(_paragraphSpacingKey) ?? 1.2;
     final textAlignmentIndex = _prefs.getInt(_textAlignmentKey) ?? 0;
     final horizontalMargin = _prefs.getDouble(_horizontalMarginKey) ?? 20.0;
+    final chapterSwipeDistance =
+        _prefs.getDouble(_chapterSwipeDistanceKey) ?? 0.18;
 
     // Load custom fonts
     List<CustomFont> customFonts = [];
@@ -74,6 +77,7 @@ class SettingsNotifier extends ChangeNotifier {
       paragraphSpacing: paragraphSpacing.clamp(0.0, 3.0),
       textAlignment: TextAlignment.values[textAlignmentIndex.clamp(0, TextAlignment.values.length - 1)],
       horizontalMargin: horizontalMargin.clamp(0.0, 40.0),
+      chapterSwipeDistance: chapterSwipeDistance.clamp(0.10, 0.40),
     );
     notifyListeners();
   }
@@ -98,6 +102,10 @@ class SettingsNotifier extends ChangeNotifier {
       _prefs.setDouble(_paragraphSpacingKey, _settings.paragraphSpacing),
       _prefs.setInt(_textAlignmentKey, _settings.textAlignment.index),
       _prefs.setDouble(_horizontalMarginKey, _settings.horizontalMargin),
+      _prefs.setDouble(
+        _chapterSwipeDistanceKey,
+        _settings.chapterSwipeDistance,
+      ),
       _prefs.setString(
         _customFontsKey,
         jsonEncode(_settings.customFonts.map((e) => e.toJson()).toList()),
@@ -261,6 +269,13 @@ class SettingsNotifier extends ChangeNotifier {
   void updateHorizontalMargin(double margin) {
     margin = margin.clamp(0.0, 40.0);
     _settings = _settings.copyWith(horizontalMargin: margin);
+    _saveSoon();
+    notifyListeners();
+  }
+
+  void updateChapterSwipeDistance(double share) {
+    share = share.clamp(0.10, 0.40);
+    _settings = _settings.copyWith(chapterSwipeDistance: share);
     _saveSoon();
     notifyListeners();
   }

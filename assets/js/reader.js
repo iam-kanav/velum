@@ -24,6 +24,9 @@ var touchStartTime = 0;
 var touchStartScroll = 0;
 var swipeAxis = null; // 'x' or 'y', decided once the finger has moved a bit
 var swipeCancelled = false;
+// Share of the screen width a swipe must cover; Flutter sets it from Settings.
+var swipeDistance = 0.18;
+window.setSwipeDistance = function(share) { swipeDistance = share; };
 
 document.addEventListener('touchstart', function(e) {
   // A second finger (pinch) rules out a swipe for the whole gesture.
@@ -55,9 +58,8 @@ document.addEventListener('touchend', function(e) {
   var deltaX = e.changedTouches[0].clientX - touchStartX;
   var deltaY = e.changedTouches[0].clientY - touchStartY;
   var deltaTime = Date.now() - touchStartTime;
-  // About a quarter of the screen width (80-150px), mostly sideways overall,
-  // and quick.
-  var minDistance = Math.min(150, Math.max(80, window.innerWidth * 0.25));
+  // Far enough (set in Settings), mostly sideways overall, and quick.
+  var minDistance = Math.max(40, window.innerWidth * swipeDistance);
 
   if (Math.abs(deltaX) > minDistance &&
       Math.abs(deltaX) > 2 * Math.abs(deltaY) &&

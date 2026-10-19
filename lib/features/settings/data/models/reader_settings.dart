@@ -93,6 +93,9 @@ class ReaderSettings extends Equatable {
   final double paragraphSpacing;
   final TextAlignment textAlignment;
   final double horizontalMargin; // 0.0 – 40.0 px
+  // How far a sideways swipe must go to change chapter, as a share of the
+  // screen width: 0.10 – 0.40.
+  final double chapterSwipeDistance;
 
   const ReaderSettings({
     this.appTheme = ReaderTheme.light,
@@ -105,6 +108,7 @@ class ReaderSettings extends Equatable {
     this.paragraphSpacing = 1.2,
     this.textAlignment = TextAlignment.left,
     this.horizontalMargin = 20.0,
+    this.chapterSwipeDistance = 0.18,
   });
 
   // Convenience getter for backward compatibility
@@ -121,6 +125,7 @@ class ReaderSettings extends Equatable {
     double? paragraphSpacing,
     TextAlignment? textAlignment,
     double? horizontalMargin,
+    double? chapterSwipeDistance,
   }) {
     return ReaderSettings(
       appTheme: appTheme ?? this.appTheme,
@@ -133,6 +138,7 @@ class ReaderSettings extends Equatable {
       paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
       textAlignment: textAlignment ?? this.textAlignment,
       horizontalMargin: horizontalMargin ?? this.horizontalMargin,
+      chapterSwipeDistance: chapterSwipeDistance ?? this.chapterSwipeDistance,
     );
   }
 
@@ -148,5 +154,6 @@ class ReaderSettings extends Equatable {
     paragraphSpacing,
     textAlignment,
     horizontalMargin,
+    chapterSwipeDistance,
   ];
 }

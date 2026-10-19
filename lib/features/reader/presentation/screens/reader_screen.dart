@@ -648,6 +648,8 @@ class _ReaderScreenState extends State<ReaderScreen>
           onPageFinished: (String url) async {
             _readerJs ??= await rootBundle.loadString('assets/js/reader.js');
             await _controller.runJavaScript(_readerJs!);
+            if (!mounted) return;
+            _sendSwipeDistance(context.read<SettingsNotifier>().settings);
 
             _isPageReady = true; // JS is now ready
             if (_followOff) setState(() => _followOff = false);
@@ -1545,6 +1547,15 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
+  /// How far a sideways swipe must go to change chapter, from Settings.
+  void _sendSwipeDistance(ReaderSettings settings) {
+    // Skipped if the page's script hasn't loaded yet; it's sent again then.
+    _controller.runJavaScript(
+      'window.setSwipeDistance && '
+      'window.setSwipeDistance(${settings.chapterSwipeDistance});',
+    );
+  }
+
   void _loadChapterContent(String? htmlContent) {
     final settings = context.read<SettingsNotifier>().settings;
 
@@ -1564,6 +1575,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     // If same chapter content but settings changed - update CSS live via JS
     if (contentSame && !settingsSame) {
       _updateCssViaJs(settings);
+      _sendSwipeDistance(settings);
       return;
     }
 
