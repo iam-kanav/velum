@@ -10,7 +10,7 @@ Open a book, press play, and follow along as each sentence lights up.
 
 ![Flutter](https://img.shields.io/badge/Flutter-3.44-02569B?logo=flutter&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white)
-![macOS](https://img.shields.io/badge/macOS-10.15%2B-000000?logo=apple&logoColor=white)
+![macOS](https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white)
 ![License](https://img.shields.io/badge/license-Apache%202.0-5B3DE3)
 
 <a href="https://github.com/iam-kanav/velum/releases/latest"><img src="https://img.shields.io/badge/Download-APK-5B3DE3?style=for-the-badge&logo=android&logoColor=white" alt="Download APK" /></a>
@@ -81,7 +81,7 @@ flutter run -d macos
 flutter build macos --release
 ```
 
-On a Mac, Velum reads aloud with the voices in System Settings → Accessibility → Spoken Content (download Enhanced or Premium voices there for the best sound), or with Edge neural voices. Auto-detect looks for EPUBs in Documents, Downloads, Desktop, Books and iCloud Drive.
+On a Mac, Velum reads aloud with the voices in System Settings → Accessibility → Spoken Content (download Enhanced or Premium voices there for the best sound), with Edge neural voices, or with the downloadable Phonon voices (Apple silicon, or Intel Macs from 2013 on). Auto-detect looks for EPUBs in Documents, Downloads, Desktop, Books and iCloud Drive.
 
 Run the tests:
 
@@ -94,7 +94,7 @@ flutter test
 
 <br/>
 
-- **Phonon library** (`native/phonon`, Rust) is prebuilt into `native/phonon/prebuilt/` and bundled by `hook/build.dart`. After changing it, rebuild with `native/phonon/build.sh` (needs Rust, cargo-ndk and the Android NDK).
+- **Phonon library** (`native/phonon`, Rust) is prebuilt into `native/phonon/prebuilt/` and bundled by `hook/build.dart`. After changing it, rebuild with `native/phonon/build.sh` (needs Rust, cargo-ndk and the Android NDK, on a Mac for the Mac libraries).
 - **Hive adapters** (`*.g.dart`) are committed. Regenerate after changing a model:
   ```bash
   dart run build_runner build --delete-conflicting-outputs
@@ -123,7 +123,7 @@ flutter test
 - Lock-screen and notification controls.
 - Notification sounds don't stop it; calls pause it and it resumes afterwards.
 - Moves on to the next chapter by itself.
-- Experimental: [Phonon](https://github.com/gradium-ai/xn-ptts) neural voices that run on the phone, offline. Download them from the voice settings (64-bit phones from about 2019 on).
+- Experimental: [Phonon](https://github.com/gradium-ai/xn-ptts) neural voices that run on the device, offline. Download them from the voice settings (64-bit phones from about 2019 on, and Macs).
 
 **Notes**
 - Tap **+** → **Create New** to write or paste anything (a whole Google Doc, an article) and listen to it like a book. Headings, lists and bold/italic are kept.

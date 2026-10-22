@@ -3,8 +3,8 @@ import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 
 /// Bundles the prebuilt Phonon library (native/phonon, built by
-/// native/phonon/build.sh) for the experimental on-device voice, on Android.
-/// Targets without a prebuilt library (32-bit Android, the Mac app) get none,
+/// native/phonon/build.sh) for the experimental on-device voice, on Android
+/// and the Mac. Targets without a prebuilt library (32-bit Android) get none,
 /// and the app reports the voice as unavailable there.
 void main(List<String> args) async {
   await build(args, (input, output) async {
@@ -13,6 +13,8 @@ void main(List<String> args) async {
     final dir = switch ((code.targetOS, code.targetArchitecture)) {
       (OS.android, Architecture.arm64) => 'android-arm64',
       (OS.android, Architecture.x64) => 'android-x64',
+      (OS.macOS, Architecture.arm64) => 'macos-arm64',
+      (OS.macOS, Architecture.x64) => 'macos-x64',
       _ => null,
     };
     if (dir == null) return;

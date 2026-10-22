@@ -51,11 +51,20 @@ external Pointer<Char> phononLastError(Pointer<PhononHandle> h);
 external void phononFree(Pointer<PhononHandle> h);
 
 /// Whether this device can run the bundled library. It is built for 64-bit
-/// Android only, and the phone build uses ARMv8.2 instructions (dotprod,
-/// fp16) that crash older CPUs, so check for them before loading.
+/// Android and the Mac. The phone build uses ARMv8.2 instructions (dotprod,
+/// fp16) and the Intel Mac build AVX2, which crash older CPUs, so check for
+/// them before loading.
 bool phononSupported() {
   final abi = Abi.current();
-  if (abi == Abi.androidX64) return true;
+  if (abi == Abi.androidX64 || abi == Abi.macosArm64) return true;
+  if (abi == Abi.macosX64) {
+    try {
+      final r = Process.runSync('/usr/sbin/sysctl', ['-n', 'hw.optional.avx2_0']);
+      return r.exitCode == 0 && (r.stdout as String).trim() == '1';
+    } catch (_) {
+      return false;
+    }
+  }
   if (abi != Abi.androidArm64) return false;
   try {
     final features = File('/proc/cpuinfo')
