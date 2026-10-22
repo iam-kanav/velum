@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 
@@ -15,13 +16,20 @@ void main(List<String> args) async {
       _ => null,
     };
     if (dir == null) return;
-    final file = code.targetOS.dylibFileName('velum_phonon');
+    final name = code.targetOS.dylibFileName('velum_phonon');
+    final prebuilt =
+        input.packageRoot.resolve('native/phonon/prebuilt/$dir/$name');
+    // Hand Flutter a copy: it treats asset files as build outputs it may
+    // delete, which would take the committed library with it.
+    final copy = input.outputDirectory.resolve(name);
+    await File.fromUri(prebuilt).copy(copy.toFilePath());
+    output.dependencies.add(prebuilt);
     output.assets.code.add(
       CodeAsset(
         package: input.packageName,
         name: 'phonon',
         linkMode: DynamicLoadingBundled(),
-        file: input.packageRoot.resolve('native/phonon/prebuilt/$dir/$file'),
+        file: copy,
       ),
     );
   });
