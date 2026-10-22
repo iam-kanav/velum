@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../data/models/tts_settings.dart';
 import '../../data/services/device_tts_engine.dart';
+import '../../data/services/phonon_model.dart';
 import '../providers/tts_notifier.dart';
 import 'pronunciations_dialog.dart';
 import 'package:velum/core/theme/app_colors.dart';
@@ -263,7 +264,9 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Speech engine (device engines, Android)
-          if (!settings.useEdgeTts && ttsNotifier.deviceEngines.isNotEmpty) ...[
+          if (!settings.useEdgeTts &&
+              !settings.usePhonon &&
+              ttsNotifier.deviceEngines.isNotEmpty) ...[
             _buildDropdownRow(
               label: 'Engine',
               value: ttsNotifier.currentDeviceEngine ?? '',
@@ -334,17 +337,18 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
 
           const SizedBox(height: 16),
 
-          // Pitch Slider
-          _buildSlider(
-            label: 'Pitch',
-            value: settings.pitch,
-            min: 0.5,
-            max: 2.0,
-            displayValue: settings.pitch.toStringAsFixed(1),
-            onChanged: ttsNotifier.updatePitch,
-          ),
-
-          const SizedBox(height: 16),
+          // Pitch Slider (Phonon voices have no pitch control)
+          if (!settings.usePhonon) ...[
+            _buildSlider(
+              label: 'Pitch',
+              value: settings.pitch,
+              min: 0.5,
+              max: 2.0,
+              displayValue: settings.pitch.toStringAsFixed(1),
+              onChanged: ttsNotifier.updatePitch,
+            ),
+            const SizedBox(height: 16),
+          ],
 
           // Volume Slider
           _buildSlider(
@@ -835,8 +839,151 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             ),
           ],
         ),
+        const SizedBox(height: 16),
+        _buildPhononRow(ttsNotifier),
       ],
     );
+  }
+
+  /// Experimental: Phonon on-device voices, downloaded here first.
+  Widget _buildPhononRow(TtsNotifier ttsNotifier) {
+    final model = context.watch<PhononModel>();
+    const size = '${PhononModel.approximateMegabytes} MB';
+    final subtitle = switch (model.status) {
+      PhononModelStatus.unsupported => 'Not available on this device.',
+      PhononModelStatus.notInstalled =>
+        'Natural voices that run on your device, offline. English only. One-time $size download.',
+      PhononModelStatus.downloading =>
+        'Downloading… ${(model.progress * 100).floor()}%',
+      PhononModelStatus.installed =>
+        'Natural voices that run on your device, offline. English only.',
+    };
+    final Widget? trailing = switch (model.status) {
+      PhononModelStatus.unsupported => null,
+      PhononModelStatus.notInstalled => OutlinedButton(
+        // Downloading is asking for the voice, so it's turned on after.
+        onPressed: ttsNotifier.downloadPhonon,
+        style: OutlinedButton.styleFrom(
+          foregroundColor: _accent,
+          side: BorderSide(color: _accent.withAlpha(120)),
+          visualDensity: VisualDensity.compact,
+        ),
+        child: const Text('Download'),
+      ),
+      PhononModelStatus.downloading => TextButton(
+        onPressed: model.cancelDownload,
+        style: TextButton.styleFrom(foregroundColor: widget.textColor),
+        child: const Text('Cancel'),
+      ),
+      PhononModelStatus.installed => Switch(
+        value: ttsNotifier.settings.usePhonon,
+        onChanged: (value) => _setUsePhonon(ttsNotifier, value),
+        activeThumbColor: _accent,
+        activeTrackColor: _accent.withAlpha(80),
+      ),
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Phonon On-Device Voices',
+                    style: TextStyle(
+                      color: widget.textColor.withAlpha(200),
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: widget.textColor.withAlpha(120),
+                      fontSize: 11,
+                    ),
+                  ),
+                  if (model.error != null &&
+                      model.status == PhononModelStatus.notInstalled)
+                    Text(
+                      model.error!,
+                      style: const TextStyle(color: Colors.redAccent, fontSize: 11),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            ?trailing,
+          ],
+        ),
+        if (model.status == PhononModelStatus.downloading) ...[
+          const SizedBox(height: 8),
+          LinearProgressIndicator(
+            value: model.progress,
+            color: _accent,
+            backgroundColor: widget.textColor.withAlpha(30),
+            minHeight: 3,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ],
+        if (model.status == PhononModelStatus.installed)
+          GestureDetector(
+            onTap: () => _confirmDeletePhonon(ttsNotifier),
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Remove download ($size)',
+                style: TextStyle(
+                  color: widget.textColor.withAlpha(150),
+                  fontSize: 12,
+                  decoration: TextDecoration.underline,
+                  decorationColor: widget.textColor.withAlpha(100),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _setUsePhonon(TtsNotifier ttsNotifier, bool value) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    if (await ttsNotifier.setUsePhonon(value)) return;
+    messenger?.showSnackBar(
+      const SnackBar(content: Text('Couldn\'t load the Phonon voice.')),
+    );
+  }
+
+  Future<void> _confirmDeletePhonon(TtsNotifier ttsNotifier) async {
+    final remove = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: widget.backgroundColor,
+        title: Text(
+          'Remove Phonon voices?',
+          style: TextStyle(color: widget.textColor),
+        ),
+        content: Text(
+          'Reading aloud goes back to your device voice. You can download them again any time.',
+          style: TextStyle(color: widget.textColor.withAlpha(200)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: widget.textColor)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remove', style: TextStyle(color: _accent)),
+          ),
+        ],
+      ),
+    );
+    if (remove == true) await ttsNotifier.deletePhononModel();
   }
 
   Widget _buildSleepTimerSelector(TtsNotifier ttsNotifier) {

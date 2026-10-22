@@ -3,29 +3,8 @@ import 'package:flutter/foundation.dart';
 import 'package:edge_tts/edge_tts.dart';
 import 'package:just_audio/just_audio.dart';
 import '../models/tts_settings.dart';
+import 'bytes_audio_source.dart';
 import 'tts_engine.dart';
-
-/// Audio source that plays MP3 bytes from memory
-// ignore: experimental_member_use
-class _BytesAudioSource extends StreamAudioSource {
-  final Uint8List _bytes;
-  _BytesAudioSource(this._bytes);
-
-  @override
-  // ignore: experimental_member_use
-  Future<StreamAudioResponse> request([int? start, int? end]) async {
-    start ??= 0;
-    end ??= _bytes.length;
-    // ignore: experimental_member_use
-    return StreamAudioResponse(
-      sourceLength: _bytes.length,
-      contentLength: end - start,
-      offset: start,
-      stream: Stream.value(_bytes.sublist(start, end)),
-      contentType: 'audio/mpeg',
-    );
-  }
-}
 
 /// LRU cache for synthesized audio chunks.
 /// Keeps the most recently used entries up to [maxSize].
@@ -266,7 +245,7 @@ class EdgeTtsEngine extends TtsEngine {
         return;
       }
 
-      await _player.setAudioSource(_BytesAudioSource(audioBytes));
+      await _player.setAudioSource(BytesAudioSource(audioBytes, 'audio/mpeg'));
       if (gen != _speakGeneration) return;
       _playing = true;
       // play()'s future only completes when playback ends, so don't await it —

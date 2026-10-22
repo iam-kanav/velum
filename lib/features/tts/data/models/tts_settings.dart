@@ -44,10 +44,15 @@ class TtsSettings extends Equatable {
   /// Experimental: use Microsoft Edge online voices instead of the device engine.
   final bool useEdgeTts;
 
+  /// Experimental: use the downloaded Phonon on-device voice. Never on
+  /// together with [useEdgeTts].
+  final bool usePhonon;
+
   /// Android TTS engine package; null means the system default.
   final String? deviceEngine;
   final String? deviceVoice;
   final String? edgeVoice;
+  final String? phononVoice;
 
   const TtsSettings({
     this.speechRate = 0.5,
@@ -58,13 +63,19 @@ class TtsSettings extends Equatable {
     this.autoContinue = true,
     this.stopOnAudioFocusLoss = true,
     this.useEdgeTts = false,
+    this.usePhonon = false,
     this.deviceEngine,
     this.deviceVoice,
     this.edgeVoice,
+    this.phononVoice,
   });
 
   /// Voice selected for the active engine (null = engine default).
-  String? get voiceName => useEdgeTts ? edgeVoice : deviceVoice;
+  String? get voiceName => usePhonon
+      ? phononVoice
+      : useEdgeTts
+          ? edgeVoice
+          : deviceVoice;
 
   TtsSettings copyWith({
     double? speechRate,
@@ -75,11 +86,14 @@ class TtsSettings extends Equatable {
     bool? autoContinue,
     bool? stopOnAudioFocusLoss,
     bool? useEdgeTts,
+    bool? usePhonon,
     String? deviceEngine,
     String? deviceVoice,
     String? edgeVoice,
+    String? phononVoice,
     bool clearDeviceVoice = false,
     bool clearEdgeVoice = false,
+    bool clearPhononVoice = false,
   }) {
     return TtsSettings(
       speechRate: speechRate ?? this.speechRate,
@@ -90,9 +104,12 @@ class TtsSettings extends Equatable {
       autoContinue: autoContinue ?? this.autoContinue,
       stopOnAudioFocusLoss: stopOnAudioFocusLoss ?? this.stopOnAudioFocusLoss,
       useEdgeTts: useEdgeTts ?? this.useEdgeTts,
+      usePhonon: usePhonon ?? this.usePhonon,
       deviceEngine: deviceEngine ?? this.deviceEngine,
       deviceVoice: clearDeviceVoice ? null : (deviceVoice ?? this.deviceVoice),
       edgeVoice: clearEdgeVoice ? null : (edgeVoice ?? this.edgeVoice),
+      phononVoice:
+          clearPhononVoice ? null : (phononVoice ?? this.phononVoice),
     );
   }
 
@@ -106,8 +123,10 @@ class TtsSettings extends Equatable {
     autoContinue,
     stopOnAudioFocusLoss,
     useEdgeTts,
+    usePhonon,
     deviceEngine,
     deviceVoice,
     edgeVoice,
+    phononVoice,
   ];
 }

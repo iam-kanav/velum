@@ -30,7 +30,7 @@ Open a book, press play, and follow along as each sentence lights up.
 ## ✨ Features
 
 - 📖 **EPUB reader.** A clean, distraction-free reader for your EPUB books, with search, a table of contents, and your place remembered in every chapter.
-- 🔊 **Read-aloud with live highlighting.** Uses your phone's own voice, works offline, and highlights each sentence as it's spoken. Want something more natural? Turn on **neural voices** (Microsoft Edge, online) in the voice settings.
+- 🔊 **Read-aloud with live highlighting.** Uses your phone's own voice, works offline, and highlights each sentence as it's spoken. Want something more natural? Turn on **neural voices** (Microsoft Edge, online), or download **Phonon on-device voices** (English, offline, 72 MB) in the voice settings.
 - 🎨 **Themes.** Light, dark and sepia, plus your choice of font, size, spacing and margins.
 - 🗂️ **Collections.** Group books into collections like "Classics" or "To read", and optionally keep them out of your main library.
 - 📋 **Listen to your clipboard.** Turn on a notification that stays in your shade (Settings → Shortcuts). Tap it and whatever you last copied is saved as a note and read aloud, without leaving the app you're in.
@@ -94,6 +94,7 @@ flutter test
 
 <br/>
 
+- **Phonon library** (`native/phonon`, Rust) is prebuilt into `native/phonon/prebuilt/` and bundled by `hook/build.dart`. After changing it, rebuild with `native/phonon/build.sh` (needs Rust, cargo-ndk and the Android NDK).
 - **Hive adapters** (`*.g.dart`) are committed. Regenerate after changing a model:
   ```bash
   dart run build_runner build --delete-conflicting-outputs
@@ -122,6 +123,7 @@ flutter test
 - Lock-screen and notification controls.
 - Notification sounds don't stop it; calls pause it and it resumes afterwards.
 - Moves on to the next chapter by itself.
+- Experimental: [Phonon](https://github.com/gradium-ai/xn-ptts) neural voices that run on the phone, offline. Download them from the voice settings (64-bit phones from about 2019 on).
 
 **Notes**
 - Tap **+** → **Create New** to write or paste anything (a whole Google Doc, an article) and listen to it like a book. Headings, lists and bold/italic are kept.

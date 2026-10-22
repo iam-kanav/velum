@@ -8,6 +8,8 @@ import '../../data/models/tts_chunk.dart';
 import '../../data/models/tts_settings.dart';
 import '../../data/services/device_tts_engine.dart';
 import '../../data/services/edge_tts_engine.dart';
+import '../../data/services/phonon_model.dart';
+import '../../data/services/phonon_tts_engine.dart';
 import '../../data/services/tts_engine.dart';
 
 /// State management for TTS functionality. Lives for the whole app, so
@@ -15,6 +17,8 @@ import '../../data/services/tts_engine.dart';
 class TtsNotifier extends ChangeNotifier {
   final DeviceTtsEngine _device;
   final EdgeTtsEngine _edge;
+  final PhononTtsEngine _phonon;
+  final PhononModel _phononModel;
   final SharedPreferences _prefs;
 
   // Persistence keys
@@ -26,6 +30,8 @@ class TtsNotifier extends ChangeNotifier {
   static const String _edgeVoiceKey = 'tts_edge_voice';
   static const String _engineKey = 'tts_device_engine';
   static const String _useEdgeKey = 'tts_use_edge';
+  static const String _phononVoiceKey = 'tts_phonon_voice';
+  static const String _usePhononKey = 'tts_use_phonon';
   static const String _highlightModeKey = 'tts_highlight_mode';
   static const String _autoContinueKey = 'tts_auto_continue';
   static const String _stopOnAudioFocusLossKey = 'tts_stop_on_audio_focus_loss';
@@ -74,7 +80,13 @@ class TtsNotifier extends ChangeNotifier {
   bool get isPlaying => _state == TtsState.playing;
   bool get isPaused => _state == TtsState.paused;
 
-  TtsEngine get _engine => _settings.useEdgeTts ? _edge : _device;
+  TtsEngine get _engine => _settings.usePhonon
+      ? _phonon
+      : _settings.useEdgeTts
+          ? _edge
+          : _device;
+
+  List<TtsEngine> get _engines => [_device, _edge, _phonon];
 
   /// Background synthesis progress for the current chapter (Edge only).
   double get synthesisProgress => _engine.prepareTotal > 0
@@ -105,13 +117,30 @@ class TtsNotifier extends ChangeNotifier {
   /// Time left on a duration-based sleep timer.
   Duration? get sleepRemaining => _sleepEndsAt?.difference(DateTime.now());
 
-  TtsNotifier(this._device, this._edge, this._prefs);
+  TtsNotifier(
+    this._device,
+    this._edge,
+    this._phonon,
+    this._phononModel,
+    this._prefs,
+  );
 
   /// Initialize TTS and load saved settings
   Future<void> init() async {
     _loadSettings();
     await _device.init();
     if (_settings.useEdgeTts) await _edge.init();
+    await _phononModel.init();
+    if (_settings.usePhonon) {
+      try {
+        await _phonon.init();
+      } catch (e) {
+        // Deleted, or no longer loads: back to the device voice.
+        debugPrint('Phonon voice unavailable: $e');
+        _settings = _settings.copyWith(usePhonon: false);
+        await _saveSettings();
+      }
+    }
     if (_disposed) return;
     _attach(_engine);
     await _engine.applySettings(_settings);
@@ -179,7 +208,7 @@ class TtsNotifier extends ChangeNotifier {
   }
 
   void _attach(TtsEngine engine) {
-    for (final e in <TtsEngine>[_device, _edge]) {
+    for (final e in _engines) {
       final active = identical(e, engine);
       e.onStart = active ? _onStart : null;
       e.onComplete = active ? _onChunkComplete : null;
@@ -195,6 +224,7 @@ class TtsNotifier extends ChangeNotifier {
   void _loadSettings() {
     var deviceVoice = _prefs.getString(_voiceKey);
     var edgeVoice = _prefs.getString(_edgeVoiceKey);
+    final usePhonon = _prefs.getBool(_usePhononKey) ?? false;
     // Older versions stored Edge voice names under the shared key.
     if (deviceVoice != null && deviceVoice.endsWith('Neural')) {
       edgeVoice ??= deviceVoice;
@@ -213,10 +243,12 @@ class TtsNotifier extends ChangeNotifier {
           .clamp(0, TtsHighlightMode.values.length - 1)],
       autoContinue: _prefs.getBool(_autoContinueKey) ?? true,
       stopOnAudioFocusLoss: _prefs.getBool(_stopOnAudioFocusLossKey) ?? true,
-      useEdgeTts: _prefs.getBool(_useEdgeKey) ?? false,
+      useEdgeTts: !usePhonon && (_prefs.getBool(_useEdgeKey) ?? false),
+      usePhonon: usePhonon,
       deviceEngine: _prefs.getString(_engineKey),
       deviceVoice: deviceVoice,
       edgeVoice: edgeVoice,
+      phononVoice: _prefs.getString(_phononVoiceKey),
     );
 
     // Never saved yet: start with the built-in titles.
@@ -246,9 +278,11 @@ class TtsNotifier extends ChangeNotifier {
       _prefs.setBool(_autoContinueKey, _settings.autoContinue),
       _prefs.setBool(_stopOnAudioFocusLossKey, _settings.stopOnAudioFocusLoss),
       _prefs.setBool(_useEdgeKey, _settings.useEdgeTts),
+      _prefs.setBool(_usePhononKey, _settings.usePhonon),
       setOrRemove(_engineKey, _settings.deviceEngine),
       setOrRemove(_voiceKey, _settings.deviceVoice),
       setOrRemove(_edgeVoiceKey, _settings.edgeVoice),
+      setOrRemove(_phononVoiceKey, _settings.phononVoice),
     ]);
   }
 
@@ -531,15 +565,18 @@ class TtsNotifier extends ChangeNotifier {
       language: language,
       clearDeviceVoice: true,
       clearEdgeVoice: true,
+      clearPhononVoice: true,
     );
     await _applyAndSave();
     _notify();
   }
 
   Future<void> updateVoice(String voiceId) async {
-    _settings = _settings.useEdgeTts
-        ? _settings.copyWith(edgeVoice: voiceId)
-        : _settings.copyWith(deviceVoice: voiceId);
+    _settings = _settings.usePhonon
+        ? _settings.copyWith(phononVoice: voiceId)
+        : _settings.useEdgeTts
+            ? _settings.copyWith(edgeVoice: voiceId)
+            : _settings.copyWith(deviceVoice: voiceId);
     await _applyAndSave();
     _notify();
   }
@@ -562,14 +599,63 @@ class TtsNotifier extends ChangeNotifier {
   /// Experimental: toggle Microsoft Edge online voices.
   Future<void> setUseEdgeTts(bool value) async {
     if (value == _settings.useEdgeTts) return;
+    await _switchEngine(
+      _settings.copyWith(useEdgeTts: value, usePhonon: false),
+      () async {
+        if (value) await _edge.init();
+      },
+    );
+  }
+
+  /// The experimental Phonon voice's download.
+  PhononModel get phononModel => _phononModel;
+
+  /// Experimental: toggle the downloaded Phonon on-device voice. Returns
+  /// false if it couldn't be loaded.
+  Future<bool> setUsePhonon(bool value) async {
+    if (value == _settings.usePhonon) return true;
+    if (value) {
+      try {
+        await _phonon.init();
+      } catch (e) {
+        debugPrint('Could not load the Phonon voice: $e');
+        return false;
+      }
+    }
+    await _switchEngine(
+      _settings.copyWith(usePhonon: value, useEdgeTts: false),
+      () async {},
+    );
+    return true;
+  }
+
+  /// Download the Phonon voice, then switch to it.
+  Future<bool> downloadPhonon() async {
+    await _phononModel.download();
+    return _phononModel.isInstalled && await setUsePhonon(true);
+  }
+
+  /// Turn the Phonon voice off and delete its download.
+  Future<void> deletePhononModel() async {
+    await setUsePhonon(false);
+    await _phonon.unload();
+    await _phononModel.delete();
+  }
+
+  /// Move playback to the engine [settings] select, carrying on where the
+  /// old one was if it was playing.
+  Future<void> _switchEngine(
+    TtsSettings settings,
+    Future<void> Function() initEngine,
+  ) async {
     final wasPlaying = isPlaying;
     await _engine.stop();
     _engine.clearCache();
     if (_state != TtsState.idle) _state = TtsState.stopped;
 
-    _settings = _settings.copyWith(useEdgeTts: value);
+    _settings = settings;
     _notify();
-    if (value) await _edge.init();
+    await initEngine();
     _attach(_engine);
     await _applyAndSave();
     _prepare();
@@ -674,7 +760,7 @@ class TtsNotifier extends ChangeNotifier {
     // so only stop them and detach (unless another notifier took over).
     _engine.stop();
     _engine.clearCache();
-    for (final e in <TtsEngine>[_device, _edge]) {
+    for (final e in _engines) {
       if (e.onComplete != _onChunkComplete) continue;
       e
         ..onStart = null

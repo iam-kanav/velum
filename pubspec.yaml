@@ -31,6 +31,9 @@ dependencies:
   hive_flutter: ^1.1.0
   flutter_tts: ^4.2.5
   archive: ^3.6.1
+  hooks: ^2.2.0
+  code_assets: ^2.1.0
+  ffi: ^2.2.0
 
 dev_dependencies:
   flutter_test:

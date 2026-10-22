@@ -10,7 +10,8 @@ class TtsVoice {
   const TtsVoice({required this.id, required this.label, required this.locale});
 }
 
-/// Common interface for the device speech engine and the Edge TTS engine.
+/// Common interface for the device speech engine, the Edge TTS engine and
+/// the Phonon on-device engine.
 abstract class TtsEngine {
   /// Fired when audio for the current utterance actually starts.
   VoidCallback? onStart;
