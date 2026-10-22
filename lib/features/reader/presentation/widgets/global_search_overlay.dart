@@ -72,8 +72,8 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      color: widget.readerTheme.backgroundColor.withAlpha((0.98 * 255).round()),
+    return Material(
+      color: widget.readerTheme.backgroundColor,
       child: SafeArea(
         child: Column(
           children: [
@@ -144,6 +144,22 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
               ),
             ),
 
+            if (!_isSearching && _searchResults.isNotEmpty)
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: Text(
+                  _searchResults.length == 1
+                      ? '1 match'
+                      : '${_searchResults.length} matches',
+                  style: TextStyle(
+                    color: widget.readerTheme.textColor.withAlpha(130),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+
             // Search Results
             Expanded(
               child: _isSearching
@@ -179,6 +195,8 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                       ),
                     )
                   : ListView.builder(
+                      keyboardDismissBehavior:
+                          ScrollViewKeyboardDismissBehavior.onDrag,
                       itemCount: _searchResults.length,
                       itemBuilder: (context, index) {
                         final result = _searchResults[index];

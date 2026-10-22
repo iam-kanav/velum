@@ -24,7 +24,8 @@ import '../providers/bookmark_notifier.dart';
 import '../widgets/contents_modal.dart';
 import '../widgets/highlights_modal.dart';
 
-import 'package:flutter/services.dart' show HapticFeedback, rootBundle;
+import 'package:flutter/services.dart'
+    show HapticFeedback, MethodChannel, rootBundle;
 import 'package:velum/features/reader/presentation/widgets/color_picker_bar.dart';
 import 'package:velum/features/reader/presentation/widgets/global_search_overlay.dart';
 import 'package:velum/features/reader/presentation/widgets/book_complete_overlay.dart';
@@ -809,7 +810,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       backgroundColor: readerTheme.backgroundColor,
       extendBodyBehindAppBar: true,
       // Wrap FAB in Consumer so only the FAB rebuilds on TTS state changes
-      floatingActionButton: notifier.currentChapter != null
+      floatingActionButton: notifier.currentChapter != null && !_showSearch
           ? Consumer<TtsNotifier>(
               builder: (context, ttsNotifier, _) {
                 return TtsFab(
@@ -1123,18 +1124,21 @@ class _ReaderScreenState extends State<ReaderScreen>
             ],
           ),
 
-          // Global search popup
+          // Search: a full page over the reader and its bars. Back closes
+          // it rather than leaving the book.
           if (_showSearch)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              left: 16,
-              right: 16,
-              bottom: MediaQuery.of(context).padding.bottom + 60,
-              child: GlobalSearchOverlay(
-                readerTheme: readerTheme,
-                notifier: notifier,
-                onResultTap: _onSearchResultTap,
-                onClose: _closeSearch,
+            Positioned.fill(
+              child: PopScope(
+                canPop: false,
+                onPopInvokedWithResult: (didPop, _) {
+                  if (!didPop) _closeSearch();
+                },
+                child: GlobalSearchOverlay(
+                  readerTheme: readerTheme,
+                  notifier: notifier,
+                  onResultTap: _onSearchResultTap,
+                  onClose: _closeSearch,
+                ),
               ),
             ),
 
@@ -1256,12 +1260,23 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  /// Open a URL in the default browser (an Android intent, or `open` on Mac).
-  void _openExternalUrl(String url) {
-    if (Platform.isAndroid) {
-      Process.run('am', ['start', '-a', 'android.intent.action.VIEW', '-d', url]);
-    } else if (Platform.isMacOS) {
-      Process.run('open', [url]);
+  static const _links = MethodChannel('velum/links');
+
+  /// Open a link from the book in the default browser (MainActivity.kt on
+  /// Android; apps can't start activities with the `am` command).
+  Future<void> _openExternalUrl(String url) async {
+    var opened = false;
+    try {
+      if (Platform.isAndroid) {
+        opened = await _links.invokeMethod<bool>('open', {'url': url}) ?? false;
+      } else if (Platform.isMacOS) {
+        opened = (await Process.run('open', [url])).exitCode == 0;
+      }
+    } catch (_) {}
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Couldn\'t open the link.')),
+      );
     }
   }
 
