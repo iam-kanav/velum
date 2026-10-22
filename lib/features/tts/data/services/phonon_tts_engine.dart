@@ -223,9 +223,13 @@ class PhononTtsEngine extends TtsEngine {
 
   /// Synthesise the first few chunks from [startFrom], dropping work queued
   /// for anywhere else in the chapter. speak() and [prefetch] keep it ahead.
+  /// [texts] is the whole chapter: audio for anything else (the chapter
+  /// before) is freed.
   @override
   void prepare(List<String> texts, {int startFrom = 0}) {
     if (_worker == null) return;
+    final chapter = texts.map(_cacheKey).toSet();
+    _cache.retainWhere(chapter.contains);
     final start = startFrom.clamp(0, texts.length);
     final window = texts
         .sublist(start, (start + _lookahead).clamp(0, texts.length))
@@ -350,6 +354,14 @@ class _WavCache {
     while (_bytes > maxBytes && _map.length > 1) {
       _bytes -= _map.remove(_map.keys.first)!.length;
     }
+  }
+
+  void retainWhere(bool Function(String key) test) {
+    _map.removeWhere((key, value) {
+      if (test(key)) return false;
+      _bytes -= value.length;
+      return true;
+    });
   }
 
   void clear() {
