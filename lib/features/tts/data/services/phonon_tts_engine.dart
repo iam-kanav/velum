@@ -486,7 +486,8 @@ void _workerMain((SendPort, String, int) args) {
       );
       if (pcm == nullptr) return null;
       try {
-        return _encodeWav(pcm.asTypedList(len.value), sampleRate);
+        final samples = pcm.asTypedList(len.value);
+        return _encodeWav(_trimTrailingSilence(samples, sampleRate), sampleRate);
       } finally {
         native.phononFreePcm(pcm, len.value);
       }
@@ -497,6 +498,25 @@ void _workerMain((SendPort, String, int) args) {
       replies.send((id, lastError(handle))); // null when cancelled
     }
   });
+}
+
+/// Phonon ends every utterance with 0.5–0.7 s of silence. Between
+/// sentences that adds to the player's own gap and sounds halting, so keep
+/// only a natural pause after the speech, faded out to avoid a click.
+Float32List _trimTrailingSilence(Float32List samples, int sampleRate) {
+  const threshold = 0.003; // speech has decayed to inaudible by here
+  var end = samples.length;
+  while (end > 0 && samples[end - 1].abs() < threshold) {
+    end--;
+  }
+  final keep = (end + sampleRate * 0.15).round();
+  if (end == 0 || keep >= samples.length) return samples;
+  final trimmed = Float32List.fromList(samples.sublist(0, keep));
+  final fade = (sampleRate * 0.03).round().clamp(1, keep);
+  for (var i = 0; i < fade; i++) {
+    trimmed[keep - 1 - i] *= i / fade;
+  }
+  return trimmed;
 }
 
 /// 16-bit mono PCM WAV.
