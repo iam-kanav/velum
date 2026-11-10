@@ -596,7 +596,7 @@ class TtsNotifier extends ChangeNotifier {
     if (wasPlaying) await play();
   }
 
-  /// Experimental: toggle Microsoft Edge online voices.
+  /// Toggle Microsoft Edge online voices.
   Future<void> setUseEdgeTts(bool value) async {
     if (value == _settings.useEdgeTts) return;
     await _switchEngine(
@@ -607,10 +607,10 @@ class TtsNotifier extends ChangeNotifier {
     );
   }
 
-  /// The experimental Phonon voice's download.
+  /// The Phonon voice's download.
   PhononModel get phononModel => _phononModel;
 
-  /// Experimental: toggle the downloaded Phonon on-device voice. Returns
+  /// Toggle the downloaded Phonon on-device voice. Returns
   /// false if it couldn't be loaded.
   Future<bool> setUsePhonon(bool value) async {
     if (value == _settings.usePhonon) return true;

@@ -41,10 +41,10 @@ class TtsSettings extends Equatable {
   final bool autoContinue; // Auto-advance to next chapter when current finishes
   final bool stopOnAudioFocusLoss; // Stop TTS when other audio plays
 
-  /// Experimental: use Microsoft Edge online voices instead of the device engine.
+  /// Use Microsoft Edge online voices instead of the device engine.
   final bool useEdgeTts;
 
-  /// Experimental: use the downloaded Phonon on-device voice. Never on
+  /// Use the downloaded Phonon on-device voice. Never on
   /// together with [useEdgeTts].
   final bool usePhonon;
 

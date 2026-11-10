@@ -35,7 +35,7 @@ class _AudioCache {
   void clear() => _map.clear();
 }
 
-/// Experimental engine: Microsoft Edge neural voices (online) played via just_audio.
+/// Microsoft Edge neural voices (online) played via just_audio.
 class EdgeTtsEngine extends TtsEngine {
   // TtsNotifier handles interruptions for both engines. Left on, the player
   // also paused and resumed itself whenever another app made a sound, even

@@ -12,7 +12,7 @@ import 'phonon_bindings.dart' as native;
 import 'phonon_model.dart';
 import 'tts_engine.dart';
 
-/// Experimental engine: Phonon (gradium-ai/xn-ptts), a small neural voice
+/// Phonon (gradium-ai/xn-ptts), a small neural voice
 /// that runs on the device, offline. The model is downloaded from the voice
 /// settings ([PhononModel]). A worker isolate turns each chunk into a WAV,
 /// a few chunks ahead of the one playing, and just_audio plays it.

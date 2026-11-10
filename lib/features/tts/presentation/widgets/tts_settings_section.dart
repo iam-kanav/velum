@@ -9,6 +9,11 @@ import 'package:velum/core/theme/app_colors.dart';
 
 const Color _accent = AppColors.accent;
 
+// Engine dropdown values for everything that isn't an Android engine package.
+const _deviceEngine = 'device';
+const _edgeEngine = 'edge';
+const _phononEngine = 'phonon';
+
 const _languageNames = <String, String>{
   'af': 'Afrikaans',
   'am': 'Amharic',
@@ -263,30 +268,9 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Speech engine (device engines, Android)
-          if (!settings.useEdgeTts &&
-              !settings.usePhonon &&
-              ttsNotifier.deviceEngines.isNotEmpty) ...[
-            _buildDropdownRow(
-              label: 'Engine',
-              value: ttsNotifier.currentDeviceEngine ?? '',
-              items: ttsNotifier.deviceEngines
-                  .map(
-                    (engine) => DropdownMenuItem<String>(
-                      value: engine,
-                      child: Text(
-                        DeviceTtsEngine.engineLabel(engine),
-                        style: TextStyle(color: widget.textColor, fontSize: 13),
-                      ),
-                    ),
-                  )
-                  .toList(),
-              onChanged: (val) {
-                if (val != null) ttsNotifier.updateDeviceEngine(val);
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
+          _buildEngineSection(ttsNotifier),
+
+          const SizedBox(height: 16),
 
           // Language Dropdown
           _buildDropdownRow(
@@ -383,11 +367,6 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           const SizedBox(height: 8),
 
           _buildPronunciationsRow(ttsNotifier),
-
-          const SizedBox(height: 16),
-
-          // Experimental: Edge online voices
-          _buildExperimentalSection(ttsNotifier),
 
           const SizedBox(height: 8),
         ],
@@ -792,136 +771,87 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     );
   }
 
-  Widget _buildExperimentalSection(TtsNotifier ttsNotifier) {
-    final enabled = ttsNotifier.settings.useEdgeTts;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'EXPERIMENTAL',
-          style: TextStyle(
-            color: widget.textColor.withAlpha(120),
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            letterSpacing: 1.2,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Microsoft Edge Voices',
-                    style: TextStyle(
-                      color: widget.textColor.withAlpha(200),
-                      fontSize: 14,
-                    ),
-                  ),
-                  Text(
-                    'Natural online voices. Needs internet and is slower to start.',
-                    style: TextStyle(
-                      color: widget.textColor.withAlpha(120),
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            Switch(
-              value: enabled,
-              onChanged: (value) => ttsNotifier.setUseEdgeTts(value),
-              activeThumbColor: _accent,
-              activeTrackColor: _accent.withAlpha(80),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
-        _buildPhononRow(ttsNotifier),
-      ],
-    );
-  }
-
-  /// Experimental: Phonon on-device voices, downloaded here first.
-  Widget _buildPhononRow(TtsNotifier ttsNotifier) {
+  /// Every way to read aloud in one dropdown: the device's own engines,
+  /// Microsoft Edge's online voices and the downloadable Phonon voices.
+  Widget _buildEngineSection(TtsNotifier ttsNotifier) {
+    final settings = ttsNotifier.settings;
     final model = context.watch<PhononModel>();
+    final deviceEngines = ttsNotifier.deviceEngines;
     const size = '${PhononModel.approximateMegabytes} MB';
-    final subtitle = switch (model.status) {
-      PhononModelStatus.unsupported => 'Not available on this device.',
-      PhononModelStatus.notInstalled =>
-        'Natural voices that run on your device, offline. English only. One-time $size download.',
-      PhononModelStatus.downloading =>
-        'Downloading… ${(model.progress * 100).floor()}%',
-      PhononModelStatus.installed =>
+
+    final selected = settings.usePhonon
+        ? _phononEngine
+        : settings.useEdgeTts
+            ? _edgeEngine
+            : deviceEngines.isEmpty
+                ? _deviceEngine
+                : ttsNotifier.currentDeviceEngine ?? '';
+    final engines = <String, String>{
+      if (deviceEngines.isEmpty)
+        _deviceEngine: 'Device voices'
+      else
+        for (final engine in deviceEngines)
+          engine: DeviceTtsEngine.engineLabel(engine),
+      _edgeEngine: 'Microsoft Edge (online)',
+      if (model.status != PhononModelStatus.unsupported)
+        _phononEngine: 'Phonon (on-device)',
+    };
+    final description = switch (selected) {
+      _edgeEngine =>
+        'Natural online voices. Needs internet and is slower to start.',
+      _phononEngine =>
         'Natural voices that run on your device, offline. English only.',
+      _ => null,
     };
-    final Widget? trailing = switch (model.status) {
-      PhononModelStatus.unsupported => null,
-      PhononModelStatus.notInstalled => OutlinedButton(
-        // Downloading is asking for the voice, so it's turned on after.
-        onPressed: ttsNotifier.downloadPhonon,
-        style: OutlinedButton.styleFrom(
-          foregroundColor: _accent,
-          side: BorderSide(color: _accent.withAlpha(120)),
-          visualDensity: VisualDensity.compact,
-        ),
-        child: const Text('Download'),
-      ),
-      PhononModelStatus.downloading => TextButton(
-        onPressed: model.cancelDownload,
-        style: TextButton.styleFrom(foregroundColor: widget.textColor),
-        child: const Text('Cancel'),
-      ),
-      PhononModelStatus.installed => Switch(
-        value: ttsNotifier.settings.usePhonon,
-        onChanged: (value) => _setUsePhonon(ttsNotifier, value),
-        activeThumbColor: _accent,
-        activeTrackColor: _accent.withAlpha(80),
-      ),
-    };
+    final captionStyle = TextStyle(
+      color: widget.textColor.withAlpha(120),
+      fontSize: 11,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Phonon On-Device Voices',
-                    style: TextStyle(
-                      color: widget.textColor.withAlpha(200),
-                      fontSize: 14,
-                    ),
-                  ),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: widget.textColor.withAlpha(120),
-                      fontSize: 11,
-                    ),
-                  ),
-                  if (model.error != null &&
-                      model.status == PhononModelStatus.notInstalled)
-                    Text(
-                      model.error!,
-                      style: const TextStyle(color: Colors.redAccent, fontSize: 11),
-                    ),
-                ],
+        _buildDropdownRow(
+          label: 'Engine',
+          value: selected,
+          items: [
+            for (final MapEntry(:key, :value) in engines.entries)
+              DropdownMenuItem<String>(
+                value: key,
+                child: Text(
+                  value,
+                  style: TextStyle(color: widget.textColor, fontSize: 13),
+                ),
               ),
-            ),
-            const SizedBox(width: 8),
-            ?trailing,
           ],
+          onChanged: (engine) {
+            if (engine != null) _selectEngine(ttsNotifier, engine);
+          },
         ),
+        if (description != null) ...[
+          const SizedBox(height: 6),
+          Text(description, style: captionStyle),
+        ],
         if (model.status == PhononModelStatus.downloading) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Downloading Phonon voices… ${(model.progress * 100).floor()}%',
+                  style: captionStyle,
+                ),
+              ),
+              TextButton(
+                onPressed: model.cancelDownload,
+                style: TextButton.styleFrom(
+                  foregroundColor: widget.textColor,
+                  visualDensity: VisualDensity.compact,
+                ),
+                child: const Text('Cancel'),
+              ),
+            ],
+          ),
           LinearProgressIndicator(
             value: model.progress,
             color: _accent,
@@ -930,7 +860,15 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             borderRadius: BorderRadius.circular(2),
           ),
         ],
-        if (model.status == PhononModelStatus.installed)
+        if (model.error != null &&
+            model.status == PhononModelStatus.notInstalled) ...[
+          const SizedBox(height: 6),
+          Text(
+            model.error!,
+            style: const TextStyle(color: Colors.redAccent, fontSize: 11),
+          ),
+        ],
+        if (settings.usePhonon && model.isInstalled)
           GestureDetector(
             onTap: () => _confirmDeletePhonon(ttsNotifier),
             child: Padding(
@@ -950,12 +888,68 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     );
   }
 
-  Future<void> _setUsePhonon(TtsNotifier ttsNotifier, bool value) async {
+  Future<void> _selectEngine(TtsNotifier ttsNotifier, String engine) async {
+    final settings = ttsNotifier.settings;
+    switch (engine) {
+      case _edgeEngine:
+        await ttsNotifier.setUseEdgeTts(true);
+      case _phononEngine:
+        await _selectPhonon(ttsNotifier);
+      default:
+        if (settings.usePhonon) {
+          await ttsNotifier.setUsePhonon(false);
+        } else if (settings.useEdgeTts) {
+          await ttsNotifier.setUseEdgeTts(false);
+        }
+        if (engine != _deviceEngine) await ttsNotifier.updateDeviceEngine(engine);
+    }
+  }
+
+  /// Switch to the Phonon voices, offering the download first if needed.
+  Future<void> _selectPhonon(TtsNotifier ttsNotifier) async {
     final messenger = ScaffoldMessenger.maybeOf(context);
-    if (await ttsNotifier.setUsePhonon(value)) return;
+    final model = ttsNotifier.phononModel;
+    var loaded = true;
+    if (model.isInstalled) {
+      loaded = await ttsNotifier.setUsePhonon(true);
+    } else if (model.status == PhononModelStatus.notInstalled) {
+      if (!await _confirmDownloadPhonon()) return;
+      // A failed or cancelled download shows under the dropdown instead.
+      loaded = await ttsNotifier.downloadPhonon() || !model.isInstalled;
+    }
+    if (loaded) return;
     messenger?.showSnackBar(
       const SnackBar(content: Text('Couldn\'t load the Phonon voice.')),
     );
+  }
+
+  Future<bool> _confirmDownloadPhonon() async {
+    final download = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: widget.backgroundColor,
+        title: Text(
+          'Download Phonon voices?',
+          style: TextStyle(color: widget.textColor),
+        ),
+        content: Text(
+          'Natural voices that run on your device, offline. English only. '
+          'One-time ${PhononModel.approximateMegabytes} MB download.',
+          style: TextStyle(color: widget.textColor.withAlpha(200)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('Cancel', style: TextStyle(color: widget.textColor)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Download', style: TextStyle(color: _accent)),
+          ),
+        ],
+      ),
+    );
+    return download == true;
   }
 
   Future<void> _confirmDeletePhonon(TtsNotifier ttsNotifier) async {

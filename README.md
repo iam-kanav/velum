@@ -123,7 +123,7 @@ flutter test
 - Lock-screen and notification controls.
 - Notification sounds don't stop it; calls pause it and it resumes afterwards.
 - Moves on to the next chapter by itself.
-- Experimental: [Phonon](https://github.com/gradium-ai/xn-ptts) neural voices that run on the device, offline. Download them from the voice settings (64-bit phones from about 2019 on, and Macs).
+- [Phonon](https://github.com/gradium-ai/xn-ptts) neural voices that run on the device, offline. Pick them as the engine in the voice settings to download them (64-bit phones from about 2019 on, and Macs).
 
 **Notes**
 - Tap **+** → **Create New** to write or paste anything (a whole Google Doc, an article) and listen to it like a book. Headings, lists and bold/italic are kept.

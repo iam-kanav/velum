@@ -29,7 +29,7 @@ class PhononVoiceInfo {
       );
 }
 
-/// The experimental Phonon voice's files: the Phonon 31m English model
+/// The Phonon voice's files: the Phonon 31m English model
 /// (Apache 2.0) and the English voices of the Phonon voice catalog, both from
 /// Hugging Face and pinned to one commit. Downloaded from the voice settings
 /// rather than shipped in the app.
