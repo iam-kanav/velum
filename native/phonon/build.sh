@@ -22,9 +22,10 @@ cargo ndk -t arm64-v8a -t x86_64 -P 24 build --release
 
 # Every Apple silicon Mac has the M1's instructions. Intel Macs need AVX2
 # (2013 on), which the app checks for. The app framework is renamed by
-# Flutter, so the install name only has to be relative.
+# Flutter, so the install name only has to be relative; the header padding
+# leaves room for the long absolute name `flutter test` rewrites it to.
 export MACOSX_DEPLOYMENT_TARGET=12.0
-MAC="-C strip=symbols -C link-arg=-Wl,-install_name,@rpath/libvelum_phonon.dylib"
+MAC="-C strip=symbols -C link-arg=-Wl,-install_name,@rpath/libvelum_phonon.dylib -C link-arg=-Wl,-headerpad_max_install_names"
 export CARGO_TARGET_AARCH64_APPLE_DARWIN_RUSTFLAGS="$MAC -C target-cpu=apple-m1"
 export CARGO_TARGET_X86_64_APPLE_DARWIN_RUSTFLAGS="$MAC -C target-cpu=x86-64-v3"
 cargo build --release --target aarch64-apple-darwin --target x86_64-apple-darwin
