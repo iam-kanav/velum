@@ -1,7 +1,7 @@
 name: velum
 description: "Velum - A beautiful EPUB reader"
 publish_to: 'none'
-version: 1.0.11+12
+version: 1.0.12+13
 
 environment:
   sdk: ^3.11.0
