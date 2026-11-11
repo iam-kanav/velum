@@ -18,13 +18,25 @@ class MainActivity : AudioServiceActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "velum/links")
             .setMethodCallHandler { call, result ->
                 if (call.method != "open") return@setMethodCallHandler result.notImplemented()
-                val url = call.argument<String>("url")
+                // Web links only: the address comes from the book.
+                val uri = call.argument<String>("url")?.let(Uri::parse)
+                if (uri?.scheme?.lowercase() !in setOf("http", "https") ||
+                    uri?.host.isNullOrEmpty()
+                ) {
+                    return@setMethodCallHandler result.success(false)
+                }
                 try {
-                    startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                    startActivity(Intent(Intent.ACTION_VIEW, uri))
                     result.success(true)
                 } catch (e: ActivityNotFoundException) {
                     result.success(false)
                 }
             }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Android 14+ lets the shortcut be swiped away while Velum is open.
+        QuickListen.restore(this)
     }
 }
