@@ -49,9 +49,19 @@ class TtsNotifier extends ChangeNotifier {
   bool _isInitialized = false;
   bool _disposed = false;
 
-  /// True once the engine has started the current chunk, so a pause can be
-  /// resumed in place. False after new content or a stop.
+  /// True while the engine still holds the current chunk, so a pause can be
+  /// resumed in place. False once the position, the chunks or what the
+  /// engine was last asked to speak (a voice preview) has changed.
   bool _canResume = false;
+
+  /// Incremented by everything that decides what should be heard (play,
+  /// pause, stop, a jump, new content). Playback calls compare it after
+  /// each await and give up if something newer has taken over.
+  int _playRequest = 0;
+
+  /// Set while [previewVoice] has the engine. Calling it hands the engine
+  /// back to reading.
+  VoidCallback? _endPreview;
 
   // The book and chapter being read aloud
   ReadAloudBook? _book;
@@ -88,7 +98,7 @@ class TtsNotifier extends ChangeNotifier {
 
   List<TtsEngine> get _engines => [_device, _edge, _phonon];
 
-  /// Background synthesis progress for the current chapter (Edge only).
+  /// Background synthesis progress for the chunks coming up (Edge only).
   double get synthesisProgress => _engine.prepareTotal > 0
       ? _engine.preparedCount / _engine.prepareTotal
       : 0.0;
@@ -101,8 +111,18 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Installed device engines (Android) and the one in use.
   List<String> get deviceEngines => _device.engines;
-  String? get currentDeviceEngine =>
-      _settings.deviceEngine ?? _device.defaultEngine;
+  String? get currentDeviceEngine {
+    final saved = _settings.deviceEngine;
+    // A saved engine that has been uninstalled isn't the one speaking.
+    return saved != null && _device.engines.contains(saved)
+        ? saved
+        : _device.activeEngine;
+  }
+
+  /// Why reading aloud last stopped, or why a voice couldn't be loaded, for
+  /// the voice settings to show. Cleared when playback starts again.
+  String? get lastError => _lastError;
+  String? _lastError;
 
   Timer? _settingsDebounce;
 
@@ -125,25 +145,37 @@ class TtsNotifier extends ChangeNotifier {
     this._prefs,
   );
 
-  /// Initialize TTS and load saved settings
+  /// Initialize TTS and load saved settings. Never throws, and always ends
+  /// up initialized: a step that fails is skipped, as the voice settings
+  /// wait for this.
   Future<void> init() async {
-    _loadSettings();
-    await _device.init();
-    if (_settings.useEdgeTts) await _edge.init();
-    await _phononModel.init();
+    Future<void> step(String name, FutureOr<void> Function() run) async {
+      try {
+        await run();
+      } catch (e) {
+        debugPrint('TTS init: $name failed: $e');
+      }
+    }
+
+    await step('settings', _loadSettings);
+    await step('device voices', _device.init);
+    // Not awaited: a slow or stalled network must not hold up the rest.
+    if (_settings.useEdgeTts) unawaited(refreshVoices());
+    await step('Phonon download', _phononModel.init);
     if (_settings.usePhonon) {
       try {
         await _phonon.init();
       } catch (e) {
         // Deleted, or no longer loads: back to the device voice.
         debugPrint('Phonon voice unavailable: $e');
+        _lastError = _phononLoadError(e);
         _settings = _settings.copyWith(usePhonon: false);
-        await _saveSettings();
+        await step('saving settings', _saveSettings);
       }
     }
     if (_disposed) return;
     _attach(_engine);
-    await _engine.applySettings(_settings);
+    await step('voice settings', () => _engine.applySettings(_settings));
 
     _isInitialized = true;
     _notify();
@@ -160,10 +192,10 @@ class TtsNotifier extends ChangeNotifier {
       );
       _audioInterruptionSub =
           _audioSession!.interruptionEventStream.listen(_onInterruption);
-      // Headphones unplugged: don't carry on out loud.
-      _becomingNoisySub = _audioSession!.becomingNoisyEventStream.listen((_) {
-        if (isPlaying) pause();
-      });
+      // Headphones unplugged: don't carry on out loud, now or when a call
+      // that had paused reading ends.
+      _becomingNoisySub =
+          _audioSession!.becomingNoisyEventStream.listen((_) => pause());
     } catch (e) {
       debugPrint('Audio session setup failed: $e');
     }
@@ -207,6 +239,23 @@ class TtsNotifier extends ChangeNotifier {
     }
   }
 
+  /// Fetch the Edge voice list if it's still missing (the app started
+  /// offline), so the Language and Voice lists fill in once there is a
+  /// connection. Called when playback starts and when the settings open.
+  Future<void> refreshVoices() async {
+    if (!_settings.useEdgeTts || _edge.voices.isNotEmpty) return;
+    try {
+      await _edge.init();
+      if (_disposed || !_settings.useEdgeTts || _edge.voices.isEmpty) return;
+      // With no voice saved, the list decides which one is the default.
+      await _edge.applySettings(_settings);
+      _prepare();
+      _notify();
+    } catch (e) {
+      debugPrint('Could not refresh the Edge voices: $e');
+    }
+  }
+
   void _attach(TtsEngine engine) {
     for (final e in _engines) {
       final active = identical(e, engine);
@@ -224,7 +273,9 @@ class TtsNotifier extends ChangeNotifier {
   void _loadSettings() {
     var deviceVoice = _prefs.getString(_voiceKey);
     var edgeVoice = _prefs.getString(_edgeVoiceKey);
-    final usePhonon = _prefs.getBool(_usePhononKey) ?? false;
+    // Anything never saved keeps the TtsSettings default.
+    const defaults = TtsSettings();
+    final usePhonon = _prefs.getBool(_usePhononKey) ?? defaults.usePhonon;
     // Older versions stored Edge voice names under the shared key.
     if (deviceVoice != null && deviceVoice.endsWith('Neural')) {
       edgeVoice ??= deviceVoice;
@@ -234,16 +285,19 @@ class TtsNotifier extends ChangeNotifier {
     }
 
     _settings = TtsSettings(
-      speechRate: (_prefs.getDouble(_speechRateKey) ?? 0.5).clamp(0.0, 2.0),
-      pitch: (_prefs.getDouble(_pitchKey) ?? 1.0).clamp(0.5, 2.0),
-      volume: (_prefs.getDouble(_volumeKey) ?? 1.0).clamp(0.0, 1.0),
-      language: _prefs.getString(_languageKey) ?? 'en-US',
-      highlightMode: TtsHighlightMode.values[(_prefs.getInt(_highlightModeKey) ??
-              0)
-          .clamp(0, TtsHighlightMode.values.length - 1)],
-      autoContinue: _prefs.getBool(_autoContinueKey) ?? true,
-      stopOnAudioFocusLoss: _prefs.getBool(_stopOnAudioFocusLossKey) ?? true,
-      useEdgeTts: !usePhonon && (_prefs.getBool(_useEdgeKey) ?? false),
+      speechRate: (_prefs.getDouble(_speechRateKey) ?? defaults.speechRate)
+          .clamp(0.0, 2.0),
+      pitch: (_prefs.getDouble(_pitchKey) ?? defaults.pitch).clamp(0.5, 2.0),
+      volume: (_prefs.getDouble(_volumeKey) ?? defaults.volume).clamp(0.0, 1.0),
+      language: _prefs.getString(_languageKey) ?? defaults.language,
+      highlightMode: TtsHighlightMode.values[
+          (_prefs.getInt(_highlightModeKey) ?? defaults.highlightMode.index)
+              .clamp(0, TtsHighlightMode.values.length - 1)],
+      autoContinue: _prefs.getBool(_autoContinueKey) ?? defaults.autoContinue,
+      stopOnAudioFocusLoss: _prefs.getBool(_stopOnAudioFocusLossKey) ??
+          defaults.stopOnAudioFocusLoss,
+      useEdgeTts:
+          !usePhonon && (_prefs.getBool(_useEdgeKey) ?? defaults.useEdgeTts),
       usePhonon: usePhonon,
       deviceEngine: _prefs.getString(_engineKey),
       deviceVoice: deviceVoice,
@@ -338,6 +392,7 @@ class TtsNotifier extends ChangeNotifier {
 
   void _onError(String error) {
     debugPrint('TTS Error: $error');
+    _lastError = error;
     _state = TtsState.stopped;
     _notify();
   }
@@ -355,6 +410,7 @@ class TtsNotifier extends ChangeNotifier {
   ) async {
     _interruptionPause?.cancel();
     _pausedByInterruption = false;
+    _playRequest++;
     if (_state == TtsState.paused) _state = TtsState.stopped;
     _book = book;
     _chapterIndex = chapter;
@@ -366,8 +422,7 @@ class TtsNotifier extends ChangeNotifier {
   }
 
   /// Load a chapter's paragraphs and prepare them for playback.
-  /// [startFromChunk] prioritises preparation from that chunk onward.
-  void loadContent(List<TtsParagraph> paragraphs, {int startFromChunk = 0}) {
+  void loadContent(List<TtsParagraph> paragraphs) {
     _canResume = false;
     _paragraphs = paragraphs;
     _chunks = chunkParagraphs(
@@ -375,8 +430,7 @@ class TtsNotifier extends ChangeNotifier {
       _settings.highlightMode,
       _pronunciations,
     );
-    _currentChunkIndex =
-        _chunks.isEmpty ? 0 : startFromChunk.clamp(0, _chunks.length - 1);
+    _currentChunkIndex = 0;
     _prepare();
     _notify();
   }
@@ -389,8 +443,17 @@ class TtsNotifier extends ChangeNotifier {
     );
   }
 
+  /// Stop reading and forget the book (it was deleted), so nothing still
+  /// shows its title or offers to play it.
+  Future<void> closeBook() async {
+    await stop();
+    _book = null;
+    clearContent();
+  }
+
   /// Clear current content (for chapter changes)
   void clearContent() {
+    _playRequest++;
     _canResume = false;
     _paragraphs = [];
     _chunks = [];
@@ -408,11 +471,15 @@ class TtsNotifier extends ChangeNotifier {
     _pausedByInterruption = false;
     if (_chunks.isEmpty) return;
     final wasPaused = _state == TtsState.paused;
+    final request = ++_playRequest;
+    _lastError = null;
+    unawaited(refreshVoices());
 
     // Update state immediately so the button and highlight respond instantly
     _state = TtsState.playing;
     _notify();
     await _activateSession();
+    if (request != _playRequest) return; // paused or stopped meanwhile
 
     if (wasPaused && _canResume && _engine.supportsResume) {
       await _engine.resume();
@@ -422,9 +489,14 @@ class TtsNotifier extends ChangeNotifier {
   }
 
   Future<void> pause() async {
-    // A manual pause (or one from the timer) shouldn't auto-resume later.
+    // A manual pause (or one from the timer) shouldn't auto-resume later,
+    // including when an interruption has already paused reading.
     _interruptionPause?.cancel();
     _pausedByInterruption = false;
+    _playRequest++;
+    // The media notification and the reader pause without checking first:
+    // with nothing playing there is nothing to pause or to resume later.
+    if (!isPlaying) return;
     _state = TtsState.paused;
     _notify();
     await _engine.pause();
@@ -434,15 +506,12 @@ class TtsNotifier extends ChangeNotifier {
   Future<void> stop() async {
     _interruptionPause?.cancel();
     _pausedByInterruption = false;
+    _playRequest++;
     _canResume = false;
     _state = TtsState.stopped;
     _notify();
     await _engine.stop();
   }
-
-  Future<void> togglePlayPause() => isPlaying ? pause() : play();
-
-  Future<void> jumpToParagraph(int paragraphIndex) => jumpTo(paragraphIndex);
 
   int _chunkIndexOf(int paragraphIndex, int? sentenceIndex) {
     final index = sentenceIndex == null
@@ -462,13 +531,21 @@ class TtsNotifier extends ChangeNotifier {
   Future<void> jumpTo(int paragraphIndex, [int? sentenceIndex]) async {
     final index = _chunkIndexOf(paragraphIndex, sentenceIndex);
     if (index < 0) return;
+    final request = ++_playRequest;
+    _lastError = null;
+    unawaited(refreshVoices());
 
-    await _engine.stop();
+    _canResume = false;
     _currentChunkIndex = index;
     _state = TtsState.playing;
     _notify();
+    // A pause or stop that arrives during these awaits keeps the new
+    // position, and nothing is spoken.
+    await _engine.stop();
+    if (request != _playRequest) return;
     _prepare(); // re-prioritise synthesis from the new position
     await _activateSession();
+    if (request != _playRequest) return;
     await _speakCurrentChunk();
   }
 
@@ -494,6 +571,7 @@ class TtsNotifier extends ChangeNotifier {
 
   Future<void> _speakCurrentChunk() async {
     if (_currentChunkIndex >= _chunks.length) return;
+    _endPreview?.call();
     _canResume = true;
 
     // Prefetch the next few chunks for seamless playback
@@ -517,7 +595,8 @@ class TtsNotifier extends ChangeNotifier {
       _sleepEndsAt = DateTime.now().add(duration);
       _sleepFire = Timer(duration, () {
         setSleepTimer(SleepTimer.off);
-        if (isPlaying) pause();
+        // Also when a call has paused reading: it mustn't resume afterwards.
+        pause();
       });
       // Refresh the "stops in N min" label
       _sleepTick = Timer.periodic(const Duration(seconds: 30), (_) => _notify());
@@ -584,20 +663,23 @@ class TtsNotifier extends ChangeNotifier {
   /// Switch the device speech engine (Android). Voices differ per engine,
   /// so the saved device voice is reset.
   Future<void> updateDeviceEngine(String engine) async {
+    _dropPhononPick();
     if (engine == currentDeviceEngine) return;
     final wasPlaying = isPlaying;
     if (wasPlaying) await stop();
+    final request = _playRequest;
     _settings = _settings.copyWith(
       deviceEngine: engine,
       clearDeviceVoice: true,
     );
     await _applyAndSave();
     _notify();
-    if (wasPlaying) await play();
+    if (wasPlaying && request == _playRequest) await play();
   }
 
   /// Toggle Microsoft Edge online voices.
   Future<void> setUseEdgeTts(bool value) async {
+    _dropPhononPick();
     if (value == _settings.useEdgeTts) return;
     await _switchEngine(
       _settings.copyWith(useEdgeTts: value, usePhonon: false),
@@ -610,17 +692,46 @@ class TtsNotifier extends ChangeNotifier {
   /// The Phonon voice's download.
   PhononModel get phononModel => _phononModel;
 
+  /// True while the Phonon model is loading, to switch to it.
+  bool get isLoadingPhonon => _loadingPhonon && _phononPicked;
+  bool _loadingPhonon = false;
+
+  /// Whether Phonon is the engine picked last, which it can be while it
+  /// still downloads or loads. Picking another one meanwhile calls off the
+  /// switch.
+  bool _phononPicked = false;
+
+  void _dropPhononPick() {
+    if (!_phononPicked) return;
+    _phononPicked = false;
+    _notify();
+  }
+
   /// Toggle the downloaded Phonon on-device voice. Returns
-  /// false if it couldn't be loaded.
+  /// false if it couldn't be loaded ([lastError] says why).
   Future<bool> setUsePhonon(bool value) async {
+    if (value) {
+      _phononPicked = true;
+    } else {
+      _dropPhononPick();
+    }
     if (value == _settings.usePhonon) return true;
     if (value) {
+      _lastError = null;
+      _loadingPhonon = true;
+      _notify();
       try {
         await _phonon.init();
       } catch (e) {
         debugPrint('Could not load the Phonon voice: $e');
+        _lastError = _phononLoadError(e);
         return false;
+      } finally {
+        _loadingPhonon = false;
+        _notify();
       }
+      // Another engine was picked while it loaded, or this one twice.
+      if (!_phononPicked || _settings.usePhonon) return true;
     }
     await _switchEngine(
       _settings.copyWith(usePhonon: value, useEdgeTts: false),
@@ -629,10 +740,17 @@ class TtsNotifier extends ChangeNotifier {
     return true;
   }
 
-  /// Download the Phonon voice, then switch to it.
+  static String _phononLoadError(Object e) =>
+      'Couldn\'t load the Phonon voices: ${e is StateError ? e.message : e}';
+
+  /// Download the Phonon voice, then switch to it unless another engine
+  /// was picked while it downloaded. Called again during the download (the
+  /// reader picked Phonon once more), it only asks for that switch.
   Future<bool> downloadPhonon() async {
+    _phononPicked = true;
     await _phononModel.download();
-    return _phononModel.isInstalled && await setUsePhonon(true);
+    if (!_phononModel.isInstalled) return false;
+    return !_phononPicked || await setUsePhonon(true);
   }
 
   /// Turn the Phonon voice off and delete its download.
@@ -640,6 +758,8 @@ class TtsNotifier extends ChangeNotifier {
     await setUsePhonon(false);
     await _phonon.unload();
     await _phononModel.delete();
+    _lastError = null;
+    _notify();
   }
 
   /// Move playback to the engine [settings] select, carrying on where the
@@ -649,6 +769,8 @@ class TtsNotifier extends ChangeNotifier {
     Future<void> Function() initEngine,
   ) async {
     final wasPlaying = isPlaying;
+    final request = _playRequest;
+    _lastError = null;
     await _engine.stop();
     _engine.clearCache();
     if (_state != TtsState.idle) _state = TtsState.stopped;
@@ -660,7 +782,8 @@ class TtsNotifier extends ChangeNotifier {
     await _applyAndSave();
     _prepare();
     _notify();
-    if (wasPlaying) await play();
+    // Unless it was paused or stopped while the new engine got ready.
+    if (wasPlaying && request == _playRequest) await play();
   }
 
   Future<void> updateHighlightMode(TtsHighlightMode mode) async {
@@ -675,13 +798,15 @@ class TtsNotifier extends ChangeNotifier {
       final wasPlaying = isPlaying;
       if (wasPlaying) await _engine.stop();
 
+      // A paused chunk no longer matches the new ones.
+      _canResume = false;
       _chunks = chunkParagraphs(_paragraphs, mode, _pronunciations);
       _currentChunkIndex = _chunks
           .indexWhere((c) => c.paragraphIndex == currentParagraph)
           .clamp(0, _chunks.length - 1);
       _prepare();
 
-      if (wasPlaying) await _speakCurrentChunk();
+      if (wasPlaying && isPlaying) await _speakCurrentChunk();
     }
     _notify();
   }
@@ -721,29 +846,51 @@ class TtsNotifier extends ChangeNotifier {
 
   /// Preview the current voice with a short sample sentence.
   /// Temporarily redirects engine callbacks so the preview doesn't
-  /// trigger auto-advance, state changes, or chunk progression.
+  /// trigger auto-advance, state changes, or chunk progression. Reading
+  /// that starts meanwhile takes the engine back and ends the preview.
   Future<void> previewVoice() async {
+    _endPreview?.call();
     final engine = _engine;
-    final completer = Completer<void>();
-    void done([_]) {
-      if (!completer.isCompleted) completer.complete();
+    final finished = Completer<void>();
+    var superseded = false;
+    void done() {
+      if (!finished.isCompleted) finished.complete();
     }
 
+    // The sample replaces a paused chunk in the engine.
+    _canResume = false;
+    _lastError = null;
     engine
       ..onStart = null
       ..onComplete = done
-      ..onError = done;
+      ..onError = (error) {
+        _lastError = error;
+        _notify();
+        done();
+      };
+    _endPreview = () {
+      superseded = true;
+      _endPreview = null;
+      _attach(_engine);
+      done();
+    };
 
     try {
       await engine.applySettings(_settings);
-      await engine.speak('The quick brown fox jumps over the lazy dog.');
-      await completer.future.timeout(
+      if (!superseded) {
+        await engine.speak('The quick brown fox jumps over the lazy dog.');
+      }
+      await finished.future.timeout(
         const Duration(seconds: 10),
         onTimeout: () {},
       );
-      await engine.stop();
+      // Not when reading has started since: this would silence it.
+      if (!superseded) await engine.stop();
     } finally {
-      _attach(_engine);
+      if (!superseded) {
+        _endPreview = null;
+        _attach(_engine);
+      }
     }
   }
 
@@ -756,12 +903,11 @@ class TtsNotifier extends ChangeNotifier {
     _interruptionPause?.cancel();
     _audioInterruptionSub?.cancel();
     _becomingNoisySub?.cancel();
-    // Engines are shared app-wide and reused on the next Reader visit,
-    // so only stop them and detach (unless another notifier took over).
+    // The engines belong to the app, not to this notifier: stop the one
+    // in use and detach from them all.
     _engine.stop();
     _engine.clearCache();
     for (final e in _engines) {
-      if (e.onComplete != _onChunkComplete) continue;
       e
         ..onStart = null
         ..onComplete = null

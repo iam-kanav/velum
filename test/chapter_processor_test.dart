@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
 import 'package:velum/features/reader/data/services/chapter_processor.dart';
 import 'package:velum/features/tts/data/models/pronunciation.dart';
@@ -26,11 +27,17 @@ List<TtsParagraph> processAndCheck(String html) {
   );
 
   String norm(String t) => t.replaceAll(RegExp(r'\s+'), ' ').trim();
+  // A line break is spoken as a space but sits between the sentence spans.
+  String noSpace(String t) => t.replaceAll(RegExp(r'\s+'), '');
 
   for (var i = 0; i < paragraphs.length; i++) {
     final el = paraEls[i];
     expect(el.attributes['data-para'], '$i');
-    expect(el.text.trim(), paragraphs[i].text);
+    final shown = el.clone(true);
+    for (final br in shown.querySelectorAll('br')) {
+      br.replaceWith(dom.Text(' '));
+    }
+    expect(shown.text.trim(), paragraphs[i].text);
 
     final sentences = paragraphs[i].sentences;
     if (sentences.isEmpty) {
@@ -42,7 +49,7 @@ List<TtsParagraph> processAndCheck(String html) {
       final pieces = el.querySelectorAll('[data-sent="${s.index}"]');
       expect(pieces, isNotEmpty, reason: 'spans for sentence ${s.index}');
       expect(pieces.every((p) => p.attributes['data-para'] == '$i'), isTrue);
-      expect(norm(pieces.map((p) => p.text).join()), norm(s.text));
+      expect(noSpace(pieces.map((p) => p.text).join()), noSpace(s.text));
     }
     // The sentences together are the paragraph: nothing missing, nothing twice.
     expect(
@@ -133,6 +140,41 @@ void main() {
       ]);
     });
 
+    test('initials do not end a sentence', () {
+      final paras = processAndCheck(
+        '<p>J. R. R. Tolkien wrote it. So did I. Then C. S. Lewis read it.</p>',
+      );
+      expect(sentenceTexts(paras.single), [
+        'J. R. R. Tolkien wrote it.',
+        'So did I.',
+        'Then C. S. Lewis read it.',
+      ]);
+    });
+
+    test('a line break is spoken as a space', () {
+      final paras = processAndCheck(
+        '<p>Roses are red<br/>Violets are blue. <i>Sugar is<br>sweet.</i> '
+        'And so are you.<br/></p><p>One<br>line</p>',
+      );
+      expect(sentenceTexts(paras.first), [
+        'Roses are red Violets are blue.',
+        'Sugar is sweet.',
+        'And so are you.',
+      ]);
+      expect(paras.last.text, 'One line');
+    });
+
+    test('long blocks with many pieces of formatting stay aligned', () {
+      final html = StringBuffer('<p>');
+      for (var i = 0; i < 300; i++) {
+        html.write('Sentence <i>number</i> $i <b>ends here. And</b> ');
+      }
+      html.write('done.</p>');
+      final paras = processAndCheck(html.toString());
+      expect(paras.single.sentences, hasLength(301));
+      expect(paras.single.sentences[1].text, 'And Sentence number 1 ends here.');
+    });
+
     test('a one-sentence paragraph has no sentence spans', () {
       final paras = processAndCheck('<p>Just one line.</p><h2>Title</h2>');
       expect(paras.map((p) => p.text), ['Just one line.', 'Title']);
@@ -183,6 +225,72 @@ void main() {
     test('whitespace-only blocks are skipped', () {
       final paras = processAndCheck('<p>   </p><p>Real.</p><div>\n</div>');
       expect(paras.map((p) => p.text), ['Real.']);
+    });
+  });
+
+  group('XHTML self-closing tags', () {
+    test('non-void elements are written out, void ones are left alone', () {
+      expect(
+        ChapterProcessor.expandSelfClosing(
+          '<title/><a id="x"/><span class="a/b" />'
+          '<br/><img src="a>b.png" alt="it\'s"/><HR />',
+        ),
+        '<title></title><a id="x"></a><span class="a/b" ></span>'
+        '<br/><img src="a>b.png" alt="it\'s"/><HR />',
+      );
+      expect(
+        ChapterProcessor.expandSelfClosing('<p>1 < 2 /> 3 and <b>x</b></p>'),
+        '<p>1 < 2 /> 3 and <b>x</b></p>',
+      );
+    });
+
+    test('an empty title does not swallow the chapter', () {
+      final paras = processAndCheck(
+        '<html><head><title/><script src="a.js"/></head>'
+        '<body><p>Body text.</p></body></html>',
+      );
+      expect(paras.map((p) => p.text), ['Body text.']);
+    });
+
+    test('an empty anchor does not wrap the rest of the chapter', () {
+      final (html, paragraphs) = ChapterProcessor.process(
+        '<body><div/><p><a id="ch1"/>First.</p><span/><p>Second.</p></body>',
+      );
+      expect(paragraphs.map((p) => p.text), ['First.', 'Second.']);
+      final body = html_parser.parse(html).body!;
+      expect(body.querySelector('a')!.text, isEmpty);
+      expect(body.querySelectorAll('p').every((p) => p.parent == body), isTrue);
+    });
+  });
+
+  group('scripts in a book', () {
+    test('scripts are removed and never read aloud', () {
+      final (html, paragraphs) = ChapterProcessor.process(
+        '<p>Before.<script>ReaderChannel.postMessage("x")</script></p>'
+        '<script type="text/javascript">var a = 1;</script>'
+        '<svg><script>alert(1)</script></svg><p>After.</p>',
+      );
+      expect(paragraphs.map((p) => p.text), ['Before.', 'After.']);
+      expect(html, isNot(contains('script')));
+      expect(html, isNot(contains('alert')));
+    });
+
+    test('event handlers and javascript: links are removed', () {
+      final (html, _) = ChapterProcessor.process(
+        '<p onclick="steal()" OnLoad="x()">Text '
+        '<a href=" JaVa\nScript:alert(1)" title="keep">link</a> '
+        '<a href="https://example.com/javascript:">ok</a>'
+        '<img src="a.png" onerror="alert(2)"/></p>'
+        '<svg><a xlink:href="javascript:alert(3)"><text>t</text></a></svg>',
+      );
+      final lower = html.toLowerCase();
+      expect(lower, isNot(contains('onclick')));
+      expect(lower, isNot(contains('onload')));
+      expect(lower, isNot(contains('onerror')));
+      expect(lower, isNot(contains('alert')));
+      expect(html, contains('title="keep"'));
+      expect(html, contains('href="https://example.com/javascript:"'));
+      expect(html, contains('src="a.png"'));
     });
   });
 

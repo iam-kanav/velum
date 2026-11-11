@@ -14,14 +14,23 @@ class CollectionService {
   List<BookCollection> load() {
     final raw = _prefs.getString(_key);
     if (raw == null) return [];
+    final collections = <BookCollection>[];
     try {
-      return (jsonDecode(raw) as List)
-          .map((e) => BookCollection.fromJson(Map<String, dynamic>.from(e)))
-          .toList();
+      for (final entry in jsonDecode(raw) as List) {
+        // One by one: a collection that can't be read is left out, instead
+        // of the next save replacing all of them with nothing.
+        try {
+          collections.add(
+            BookCollection.fromJson(Map<String, dynamic>.from(entry as Map)),
+          );
+        } catch (e) {
+          debugPrint('Skipping unreadable collection: $e');
+        }
+      }
     } catch (e) {
       debugPrint('Failed to read collections: $e');
-      return [];
     }
+    return collections;
   }
 
   Future<void> _save(List<BookCollection> collections) => _prefs.setString(
@@ -72,9 +81,24 @@ class CollectionService {
             ),
       ]);
 
-  /// Drop a book removed from the library from every collection.
-  Future<void> forgetBook(String path) => _save([
+  /// Drop books removed from the library from every collection.
+  Future<void> forgetBooks(Iterable<String> paths) {
+    final gone = paths.toSet();
+    return _save([
+      for (final c in load())
+        c.copyWith(
+          bookPaths: c.bookPaths.where((p) => !gone.contains(p)).toList(),
+        ),
+    ]);
+  }
+
+  /// Books whose file moved ([moves]: old path to new) stay in their
+  /// collections under the new path.
+  Future<void> moveBooks(Map<String, String> moves) => _save([
     for (final c in load())
-      c.copyWith(bookPaths: c.bookPaths.where((p) => p != path).toList()),
+      // A set, in case the new path was somehow in the collection already.
+      c.copyWith(
+        bookPaths: {for (final p in c.bookPaths) moves[p] ?? p}.toList(),
+      ),
   ]);
 }

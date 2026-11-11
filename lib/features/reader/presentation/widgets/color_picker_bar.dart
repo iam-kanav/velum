@@ -5,7 +5,7 @@ import '../../../settings/data/models/reader_settings.dart';
 /// Compact pill of highlight colours, shown just below the selected text.
 class ColorPickerBar extends StatelessWidget {
   final ReaderTheme readerTheme;
-  final Function(String, Color) onHighlightSelected;
+  final ValueChanged<String> onHighlightSelected;
 
   const ColorPickerBar({
     super.key,
@@ -50,7 +50,7 @@ class ColorPickerBar extends StatelessWidget {
                 behavior: HitTestBehavior.opaque,
                 onTap: () {
                   HapticFeedback.lightImpact();
-                  onHighlightSelected(colors[i].$1, colors[i].$2);
+                  onHighlightSelected(colors[i].$1);
                 },
                 child: Container(
                   width: dot,

@@ -7,7 +7,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:uuid/uuid.dart';
 import '../../../core/storage/app_directory.dart';
 
-/// A text the user typed or pasted into Velum ("New File").
+/// A text the user typed or pasted into Velum ("New note").
 class Note {
   final String title;
   final String html;
@@ -23,9 +23,15 @@ class Note {
 class NoteService {
   const NoteService();
 
-  /// Whether [path] is a note created in Velum (and so can be edited).
-  static bool isNote(String path) =>
-      p.basename(p.dirname(path)) == 'notes' && path.endsWith('.epub');
+  /// Whether [path] is a note created in Velum (and so can be edited): an
+  /// EPUB in Velum's own notes folder, not just any folder called `notes`.
+  static bool isNote(String path) {
+    if (!path.endsWith('.epub')) return false;
+    final appData = appDataPath;
+    return appData == null
+        ? p.basename(p.dirname(path)) == 'notes'
+        : p.equals(p.dirname(path), p.join(appData, 'notes'));
+  }
 
   Future<Directory> _dir() async {
     final dir = Directory(
@@ -53,11 +59,27 @@ class NoteService {
   /// path of the note's EPUB.
   Future<String> save(Note note, {String? epubPath}) async {
     epubPath ??= p.join((await _dir()).path, '${const Uuid().v4()}.epub');
-    await File(epubPath).writeAsBytes(buildEpub(note), flush: true);
-    await File(_sourcePath(epubPath)).writeAsString(
-      jsonEncode({'title': note.title, 'html': note.html}),
-      flush: true,
-    );
+    final sourcePath = _sourcePath(epubPath);
+    // Written beside the note and renamed into place, so a failure part-way
+    // can't leave a truncated EPUB where the old one was.
+    final epubTemp = File('$epubPath.tmp');
+    final sourceTemp = File('$sourcePath.tmp');
+    try {
+      await epubTemp.writeAsBytes(buildEpub(note), flush: true);
+      await sourceTemp.writeAsString(
+        jsonEncode({'title': note.title, 'html': note.html}),
+        flush: true,
+      );
+      await epubTemp.rename(epubPath);
+      await sourceTemp.rename(sourcePath);
+    } catch (_) {
+      for (final temp in [epubTemp, sourceTemp]) {
+        try {
+          if (await temp.exists()) await temp.delete();
+        } catch (_) {}
+      }
+      rethrow;
+    }
     return epubPath;
   }
 

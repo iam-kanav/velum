@@ -138,9 +138,9 @@ document.body.addEventListener('click', function(e) {
 // user scrolls it out of view themselves. Flutter then shows "Back to reading";
 // following resumes when that's tapped or the sentence is back on screen.
 //
-// While the user is scrolling (finger down, or the page still gliding after
-// they let go) the page never auto-scrolls; once it settles, following stays
-// on only if the spoken sentence is still on screen.
+// While the user is scrolling (finger down, wheel or keys, or the page still
+// gliding after they let go) the page never auto-scrolls; once it settles,
+// following stays on only if the spoken sentence is still on screen.
 window._ttsFollow = true;
 var _touching = false, _userScrolling = false, _touchY = 0, _settleTimer;
 
@@ -157,6 +157,35 @@ function endTouch() {
 }
 document.addEventListener('touchend', endTouch, { passive: true });
 document.addEventListener('touchcancel', endTouch, { passive: true });
+
+// Scrolling with a mouse wheel, trackpad or the keyboard (the Mac app) is the
+// user scrolling just as a finger is: the page must not snap back to the
+// spoken sentence, and "Back to reading" shows once that is out of view.
+function userScrolled() {
+  _userScrolling = true;
+  scheduleSettle();
+}
+document.addEventListener('wheel', function(e) {
+  // Pinch-zoom arrives as a wheel event with ctrlKey; sideways doesn't scroll.
+  if (e.ctrlKey || !e.deltaY) return;
+  userScrolled();
+}, { passive: true });
+
+var scrollKeys = { ArrowUp: 1, ArrowDown: 1, PageUp: 1, PageDown: 1, Home: 1, End: 1, ' ': 1 };
+document.addEventListener('keydown', function(e) {
+  if (scrollKeys[e.key]) {
+    userScrolled();
+    return;
+  }
+  // Left/Right turn to the previous/next chapter, as a swipe does. With a
+  // modifier they mean something else (extend the selection, go back).
+  if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey || e.repeat) return;
+  if (e.key === 'ArrowLeft') {
+    ReaderChannel.postMessage('prev');
+  } else if (e.key === 'ArrowRight') {
+    ReaderChannel.postMessage('next');
+  }
+});
 
 // Called on every scroll event and when the finger lifts: once nothing has
 // moved for a moment, decide whether to keep following.
@@ -285,83 +314,6 @@ window.addEventListener('scroll', function() {
   scheduleSettle();
 });
 
-// Search functions
-window._searchMatches = [];
-window._searchIndex = -1;
-
-window.searchFind = function(query) {
-  window.searchClear();
-  if (!query || query.length === 0) {
-    ReaderChannel.postMessage('search-results:0');
-    return;
-  }
-  var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-  var textNodes = [];
-  while (walker.nextNode()) textNodes.push(walker.currentNode);
-  var lowerQ = query.toLowerCase();
-  var count = 0;
-  textNodes.forEach(function(node) {
-    var text = node.nodeValue;
-    var lower = text.toLowerCase();
-    var idx = lower.indexOf(lowerQ);
-    if (idx === -1) return;
-    var parent = node.parentNode;
-    var frag = document.createDocumentFragment();
-    var last = 0;
-    while (idx !== -1) {
-      if (idx > last) frag.appendChild(document.createTextNode(text.substring(last, idx)));
-      var mark = document.createElement('mark');
-      mark.className = 'search-match';
-      mark.setAttribute('data-si', count.toString());
-      mark.textContent = text.substring(idx, idx + query.length);
-      frag.appendChild(mark);
-      count++;
-      last = idx + query.length;
-      idx = lower.indexOf(lowerQ, last);
-    }
-    if (last < text.length) frag.appendChild(document.createTextNode(text.substring(last)));
-    parent.replaceChild(frag, node);
-  });
-  window._searchMatches = document.querySelectorAll('.search-match');
-  if (count > 0) {
-    window._searchIndex = 0;
-    window._searchMatches[0].classList.add('search-current');
-    window._searchMatches[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }
-  ReaderChannel.postMessage('search-results:' + count);
-};
-
-window.searchNext = function() {
-  var m = window._searchMatches;
-  if (!m || m.length === 0) return;
-  m[window._searchIndex].classList.remove('search-current');
-  window._searchIndex = (window._searchIndex + 1) % m.length;
-  m[window._searchIndex].classList.add('search-current');
-  m[window._searchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
-  ReaderChannel.postMessage('search-index:' + window._searchIndex);
-};
-
-window.searchPrev = function() {
-  var m = window._searchMatches;
-  if (!m || m.length === 0) return;
-  m[window._searchIndex].classList.remove('search-current');
-  window._searchIndex = (window._searchIndex - 1 + m.length) % m.length;
-  m[window._searchIndex].classList.add('search-current');
-  m[window._searchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
-  ReaderChannel.postMessage('search-index:' + window._searchIndex);
-};
-
-window.searchClear = function() {
-  var marks = document.querySelectorAll('.search-match');
-  marks.forEach(function(mk) {
-    var p = mk.parentNode;
-    p.replaceChild(document.createTextNode(mk.textContent), mk);
-    p.normalize();
-  });
-  window._searchMatches = [];
-  window._searchIndex = -1;
-};
-
 // ── Highlight system ──────────────────────────────────────────
 // Listen for text selection changes
 var selectionTimeout;
@@ -376,7 +328,9 @@ function reportSelection() {
     preRange.selectNodeContents(document.body);
     preRange.setEnd(range.startContainer, range.startOffset);
     var startOffset = preRange.toString().length;
-    var endOffset = startOffset + sel.toString().length;
+    // Counted the same way as the start (characters of the text nodes);
+    // sel.toString() is the rendered text, with line breaks added.
+    var endOffset = startOffset + range.toString().length;
     var rects = range.getClientRects();
     var first = rects.length ? rects[0] : range.getBoundingClientRect();
     var last = rects.length ? rects[rects.length - 1] : first;
@@ -432,17 +386,10 @@ window.applyHighlight = function(startOffset, endOffset, color, hlId) {
     var mark = document.createElement('mark');
     mark.className = 'user-highlight';
     mark.setAttribute('data-hl-id', hlId);
+    // Inline and !important: the page's stylesheet clears every background.
     mark.style.setProperty('background-color', color, 'important');
-    mark.style.setProperty('border-radius', '2px', 'important');
-    mark.style.setProperty('padding', '1px 0', 'important');
-    try {
-      range.surroundContents(mark);
-    } catch(e) {
-      // If surroundContents fails (partial overlap), use extractContents
-      var frag = range.extractContents();
-      mark.appendChild(frag);
-      range.insertNode(mark);
-    }
+    // The range lies inside one text node, so it can always be wrapped.
+    range.surroundContents(mark);
   }
   // Clear selection after highlighting
   window.getSelection().removeAllRanges();

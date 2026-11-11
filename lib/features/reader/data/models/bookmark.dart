@@ -1,6 +1,4 @@
-import 'package:equatable/equatable.dart';
-
-class Bookmark extends Equatable {
+class Bookmark {
   final String id;
   final String bookPath;
   final int chapterIndex;
@@ -34,7 +32,4 @@ class Bookmark extends Equatable {
     label: json['label'] as String?,
     createdAt: DateTime.parse(json['createdAt'] as String),
   );
-
-  @override
-  List<Object?> get props => [id, bookPath, chapterIndex, scrollPosition, label, createdAt];
 }

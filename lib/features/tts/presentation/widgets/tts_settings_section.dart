@@ -6,6 +6,7 @@ import '../../data/services/phonon_model.dart';
 import '../providers/tts_notifier.dart';
 import 'pronunciations_dialog.dart';
 import 'package:velum/core/theme/app_colors.dart';
+import 'package:velum/core/motion/motion.dart';
 
 const Color _accent = AppColors.accent;
 
@@ -186,6 +187,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
   void initState() {
     super.initState();
     _isExpanded = widget.startExpanded;
+    // The app may have started offline, leaving the online voice list empty.
+    context.read<TtsNotifier>().refreshVoices();
   }
 
   @override
@@ -238,9 +241,11 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                     ),
                   ],
                 ),
-                Icon(
-                  _isExpanded ? Icons.expand_less : Icons.expand_more,
-                  color: widget.textColor,
+                AnimatedRotation(
+                  turns: _isExpanded ? 0.5 : 0,
+                  duration: Motion.fast,
+                  curve: Motion.smoothOut,
+                  child: Icon(Icons.expand_more, color: widget.textColor),
                 ),
               ],
             ),
@@ -248,13 +253,20 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         ),
 
         // Expanded content
-        AnimatedCrossFade(
-          firstChild: const SizedBox.shrink(),
-          secondChild: _buildExpandedContent(ttsNotifier),
-          crossFadeState: _isExpanded
-              ? CrossFadeState.showSecond
-              : CrossFadeState.showFirst,
-          duration: const Duration(milliseconds: 200),
+        // Grows open from the header and fades in.
+        ClipRect(
+          child: AnimatedSize(
+            duration: Motion.fast,
+            curve: Motion.smoothOut,
+            alignment: Alignment.topCenter,
+            child: AnimatedOpacity(
+              opacity: _isExpanded ? 1 : 0,
+              duration: _isExpanded ? Motion.fast : Motion.quick,
+              child: _isExpanded
+                  ? _buildExpandedContent(ttsNotifier)
+                  : const SizedBox(width: double.infinity),
+            ),
+          ),
         ),
       ],
     );
@@ -262,6 +274,11 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
 
   Widget _buildExpandedContent(TtsNotifier ttsNotifier) {
     final settings = ttsNotifier.settings;
+    // Engines list locales by code; the menu goes by the names shown.
+    final languages = [
+      for (final locale in ttsNotifier.availableLanguages)
+        (_friendlyLanguageName(locale), locale),
+    ]..sort((a, b) => a.$1.compareTo(b.$1));
 
     return Padding(
       padding: const EdgeInsets.only(top: 8),
@@ -276,25 +293,16 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           _buildDropdownRow(
             label: 'Language',
             value: settings.language,
-            items:
-                (ttsNotifier.availableLanguages.toList()..sort(
-                      (a, b) => _friendlyLanguageName(
-                        a.toString(),
-                      ).compareTo(_friendlyLanguageName(b.toString())),
-                    ))
-                    .map(
-                      (lang) => DropdownMenuItem<String>(
-                        value: lang.toString(),
-                        child: Text(
-                          _friendlyLanguageName(lang.toString()),
-                          style: TextStyle(
-                            color: widget.textColor,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    )
-                    .toList(),
+            items: [
+              for (final (name, locale) in languages)
+                DropdownMenuItem<String>(
+                  value: locale,
+                  child: Text(
+                    name,
+                    style: TextStyle(color: widget.textColor, fontSize: 13),
+                  ),
+                ),
+            ],
             onChanged: (val) {
               if (val != null) ttsNotifier.updateLanguage(val);
             },
@@ -307,15 +315,15 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
 
           const SizedBox(height: 20),
 
-          // Speech Rate: slider in 0.1x steps from 0.2x to 4x.
-          // speechRate is stored with 0.5 = normal, so x = speechRate * 2.
+          // Speech Rate: slider in 0.1x steps from 0.2x to 4x (speechRate
+          // is stored at half the speed shown).
           _buildSlider(
             label: 'Speed',
             value: settings.speechRate,
             min: 0.1,
             max: 2.0,
             divisions: 38,
-            displayValue: '${(settings.speechRate * 2).toStringAsFixed(1)}x',
+            displayValue: '${settings.speed.toStringAsFixed(1)}x',
             onChanged: ttsNotifier.updateSpeechRate,
           ),
 
@@ -481,7 +489,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                             value: voice.id,
                             child: Text(
                               voice.label,
-                              style: TextStyle(color: widget.textColor, fontSize: 13),
+                              style: TextStyle(
+                                color: widget.textColor,
+                                fontSize: 13,
+                              ),
                             ),
                           ),
                         )
@@ -622,7 +633,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
               padding: const EdgeInsets.only(right: 10),
               child: GestureDetector(
                 onTap: () => ttsNotifier.updateHighlightMode(mode),
-                child: Container(
+                child: AnimatedContainer(
+                  duration: Motion.quick,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
                     vertical: 8,
@@ -779,13 +791,15 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     final deviceEngines = ttsNotifier.deviceEngines;
     const size = '${PhononModel.approximateMegabytes} MB';
 
-    final selected = settings.usePhonon
+    // Phonon also while it loads, rather than the engine about to be left.
+    final loadingPhonon = ttsNotifier.isLoadingPhonon;
+    final selected = settings.usePhonon || loadingPhonon
         ? _phononEngine
         : settings.useEdgeTts
-            ? _edgeEngine
-            : deviceEngines.isEmpty
-                ? _deviceEngine
-                : ttsNotifier.currentDeviceEngine ?? '';
+        ? _edgeEngine
+        : deviceEngines.isEmpty
+        ? _deviceEngine
+        : ttsNotifier.currentDeviceEngine ?? '';
     final engines = <String, String>{
       if (deviceEngines.isEmpty)
         _deviceEngine: 'Device voices'
@@ -807,6 +821,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
       color: widget.textColor.withAlpha(120),
       fontSize: 11,
     );
+    const errorStyle = TextStyle(color: Colors.redAccent, fontSize: 11);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -831,6 +846,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
         if (description != null) ...[
           const SizedBox(height: 6),
           Text(description, style: captionStyle),
+        ],
+        if (loadingPhonon) ...[
+          const SizedBox(height: 6),
+          Text('Loading the Phonon voices…', style: captionStyle),
         ],
         if (model.status == PhononModelStatus.downloading) ...[
           const SizedBox(height: 6),
@@ -860,15 +879,19 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             borderRadius: BorderRadius.circular(2),
           ),
         ],
-        if (model.error != null &&
-            model.status == PhononModelStatus.notInstalled) ...[
+        if (model.error != null) ...[
           const SizedBox(height: 6),
-          Text(
-            model.error!,
-            style: const TextStyle(color: Colors.redAccent, fontSize: 11),
-          ),
+          Text(model.error!, style: errorStyle),
         ],
-        if (settings.usePhonon && model.isInstalled)
+        // Shown here rather than in a SnackBar, which would be drawn on the
+        // reader's page, under this sheet.
+        if (ttsNotifier.lastError != null) ...[
+          const SizedBox(height: 6),
+          Text(ttsNotifier.lastError!, style: errorStyle),
+        ],
+        // Also while another engine is in use: a download that won't load
+        // can only be replaced after removing it.
+        if (model.isInstalled)
           GestureDetector(
             onTap: () => _confirmDeletePhonon(ttsNotifier),
             child: Padding(
@@ -889,42 +912,38 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
   }
 
   Future<void> _selectEngine(TtsNotifier ttsNotifier, String engine) async {
-    final settings = ttsNotifier.settings;
     switch (engine) {
       case _edgeEngine:
         await ttsNotifier.setUseEdgeTts(true);
       case _phononEngine:
         await _selectPhonon(ttsNotifier);
       default:
-        if (settings.usePhonon) {
-          await ttsNotifier.setUsePhonon(false);
-        } else if (settings.useEdgeTts) {
-          await ttsNotifier.setUseEdgeTts(false);
+        // Both are called even when already off: that tells the notifier
+        // not to switch to Phonon when its download or loading ends.
+        await ttsNotifier.setUsePhonon(false);
+        await ttsNotifier.setUseEdgeTts(false);
+        if (engine != _deviceEngine) {
+          await ttsNotifier.updateDeviceEngine(engine);
         }
-        if (engine != _deviceEngine) await ttsNotifier.updateDeviceEngine(engine);
     }
   }
 
   /// Switch to the Phonon voices, offering the download first if needed.
+  /// A failed download or a voice that won't load shows under the dropdown.
   Future<void> _selectPhonon(TtsNotifier ttsNotifier) async {
-    final messenger = ScaffoldMessenger.maybeOf(context);
     final model = ttsNotifier.phononModel;
-    var loaded = true;
     if (model.isInstalled) {
-      loaded = await ttsNotifier.setUsePhonon(true);
-    } else if (model.status == PhononModelStatus.notInstalled) {
-      if (!await _confirmDownloadPhonon()) return;
-      // A failed or cancelled download shows under the dropdown instead.
-      loaded = await ttsNotifier.downloadPhonon() || !model.isInstalled;
+      await ttsNotifier.setUsePhonon(true);
+    } else if (model.status == PhononModelStatus.downloading ||
+        await _confirmDownloadPhonon()) {
+      // Already downloading: it switches when done, as it would have if
+      // another engine hadn't been picked in between.
+      await ttsNotifier.downloadPhonon();
     }
-    if (loaded) return;
-    messenger?.showSnackBar(
-      const SnackBar(content: Text('Couldn\'t load the Phonon voice.')),
-    );
   }
 
   Future<bool> _confirmDownloadPhonon() async {
-    final download = await showDialog<bool>(
+    final download = await showMotionDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: widget.backgroundColor,
@@ -953,7 +972,7 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
   }
 
   Future<void> _confirmDeletePhonon(TtsNotifier ttsNotifier) async {
-    final remove = await showDialog<bool>(
+    final remove = await showMotionDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: widget.backgroundColor,
@@ -962,7 +981,8 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
           style: TextStyle(color: widget.textColor),
         ),
         content: Text(
-          'Reading aloud goes back to your device voice. You can download them again any time.',
+          '${ttsNotifier.settings.usePhonon ? 'Reading aloud goes back to your device voice. ' : ''}'
+          'You can download them again any time.',
           style: TextStyle(color: widget.textColor.withAlpha(200)),
         ),
         actions: [
@@ -986,9 +1006,10 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
     final status = switch (current) {
       SleepTimer.off => null,
       SleepTimer.endOfChapter => 'Stops at the end of this chapter',
-      _ => remaining == null
-          ? null
-          : 'Stops in ${(remaining.inSeconds / 60).ceil().clamp(1, 999)} min',
+      _ =>
+        remaining == null
+            ? null
+            : 'Stops in ${(remaining.inSeconds / 60).ceil().clamp(1, 999)} min',
     };
 
     return Column(
@@ -1017,13 +1038,19 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
             final isSelected = current == timer;
             return GestureDetector(
               onTap: () => ttsNotifier.setSleepTimer(timer),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: AnimatedContainer(
+                duration: Motion.quick,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 8,
+                ),
                 decoration: BoxDecoration(
                   color: isSelected ? _accent : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isSelected ? _accent : widget.textColor.withAlpha(60),
+                    color: isSelected
+                        ? _accent
+                        : widget.textColor.withAlpha(60),
                   ),
                 ),
                 child: Text(
@@ -1031,7 +1058,9 @@ class _TtsSettingsSectionState extends State<TtsSettingsSection> {
                   style: TextStyle(
                     fontSize: 13,
                     color: isSelected ? Colors.white : widget.textColor,
-                    fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
+                    fontWeight: isSelected
+                        ? FontWeight.w600
+                        : FontWeight.normal,
                   ),
                 ),
               ),

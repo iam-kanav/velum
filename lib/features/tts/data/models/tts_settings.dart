@@ -1,6 +1,7 @@
 import 'package:equatable/equatable.dart';
 
-/// Highlight granularity for TTS - visual only, doesn't affect playback
+/// What is highlighted while reading aloud, which is also what is spoken
+/// in one go: text is cut into chunks of this size.
 enum TtsHighlightMode {
   sentence,
   paragraph;
@@ -39,7 +40,7 @@ class TtsSettings extends Equatable {
   final String language;
   final TtsHighlightMode highlightMode;
   final bool autoContinue; // Auto-advance to next chapter when current finishes
-  final bool stopOnAudioFocusLoss; // Stop TTS when other audio plays
+  final bool stopOnAudioFocusLoss; // Pause for calls and other apps' audio
 
   /// Use Microsoft Edge online voices instead of the device engine.
   final bool useEdgeTts;
@@ -69,6 +70,10 @@ class TtsSettings extends Equatable {
     this.edgeVoice,
     this.phononVoice,
   });
+
+  /// Playback speed as a multiple of normal. [speechRate] is stored on the
+  /// device engine's scale, where 0.5 is normal speed.
+  double get speed => speechRate * 2;
 
   /// Voice selected for the active engine (null = engine default).
   String? get voiceName => usePhonon

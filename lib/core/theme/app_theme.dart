@@ -1,48 +1,55 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../motion/motion.dart';
 import 'app_colors.dart';
 
 class AppTheme {
   const AppTheme._();
 
-  static ThemeData get lightTheme {
-    return ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.light,
-      scaffoldBackgroundColor: AppColors.lightSurface,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: AppColors.accent,
-        brightness: Brightness.light,
-        surface: AppColors.lightSurface,
-        onSurface: AppColors.inkBlack,
-      ),
-      textTheme: _buildTextTheme(AppColors.inkBlack, AppColors.stoneGrey),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.lightSurface,
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        iconTheme: IconThemeData(color: AppColors.inkBlack),
-      ),
-    );
-  }
+  // Built once each: nothing in them changes, and a ThemeData is costly
+  // to make.
+  static final ThemeData lightTheme = _build(
+    Brightness.light,
+    surface: AppColors.lightSurface,
+    primary: AppColors.inkBlack,
+    secondary: AppColors.stoneGrey,
+  );
 
-  static ThemeData get darkTheme {
+  static final ThemeData darkTheme = _build(
+    Brightness.dark,
+    surface: AppColors.darkSurface,
+    primary: AppColors.starlight,
+    secondary: AppColors.ash,
+  );
+
+  static ThemeData _build(
+    Brightness brightness, {
+    required Color surface,
+    required Color primary,
+    required Color secondary,
+  }) {
     return ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: AppColors.darkSurface,
+      brightness: brightness,
+      scaffoldBackgroundColor: surface,
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppColors.accent,
-        brightness: Brightness.dark,
-        surface: AppColors.darkSurface,
-        onSurface: AppColors.starlight,
+        brightness: brightness,
+        surface: surface,
+        onSurface: primary,
       ),
-      textTheme: _buildTextTheme(AppColors.starlight, AppColors.ash),
-      appBarTheme: const AppBarTheme(
-        backgroundColor: AppColors.darkSurface,
+      textTheme: _buildTextTheme(primary, secondary),
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: MotionPageTransitionsBuilder(),
+          TargetPlatform.macOS: MotionPageTransitionsBuilder(),
+        },
+      ),
+      appBarTheme: AppBarTheme(
+        backgroundColor: surface,
         elevation: 0,
         scrolledUnderElevation: 0,
-        iconTheme: IconThemeData(color: AppColors.starlight),
+        iconTheme: IconThemeData(color: primary),
       ),
     );
   }

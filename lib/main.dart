@@ -7,7 +7,7 @@ import 'core/router/app_router.dart';
 import 'core/storage/app_directory.dart';
 import 'core/theme/app_theme.dart';
 
-import 'package:hive_flutter/hive_flutter.dart';
+import 'package:hive/hive.dart';
 
 import 'features/settings/data/models/reader_settings.dart';
 import 'features/settings/presentation/providers/settings_notifier.dart';
@@ -26,12 +26,10 @@ import 'features/tts/presentation/providers/tts_notifier.dart';
 
 import 'features/library/data/services/collection_service.dart';
 import 'features/notes/data/clipboard_listen.dart';
-
-late VelumAudioHandler audioHandler;
+import 'features/notes/presentation/note_editor_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
 
   // Initialize SharedPreferences
   final prefs = await SharedPreferences.getInstance();
@@ -49,7 +47,7 @@ void main() async {
   final bookmarkService = BookmarkService(prefs);
 
   // Initialize audio_service for media notification controls
-  audioHandler = await AudioService.init(
+  final audioHandler = await AudioService.init(
     builder: () => VelumAudioHandler(),
     config: const AudioServiceConfig(
       androidNotificationChannelId: 'com.velum.reader.tts',
@@ -65,26 +63,33 @@ void main() async {
     libraryService,
     CollectionService(prefs),
   );
-  final deviceTts = DeviceTtsEngine();
-  final edgeTts = EdgeTtsEngine();
   final phononModel = PhononModel();
   // App-wide, so reading aloud carries on in the library and while another
   // book is open.
   final ttsNotifier = TtsNotifier(
-    deviceTts,
-    edgeTts,
+    DeviceTtsEngine(),
+    EdgeTtsEngine(),
     PhononTtsEngine(phononModel),
     phononModel,
     prefs,
   );
-  final ttsReady = ttsNotifier.init();
+  // Not awaited unless the clipboard is listened to, so a failure is
+  // handled here rather than left as an unhandled async error.
+  final ttsReady = ttsNotifier.init().catchError((Object e) {
+    debugPrint('Read-aloud failed to start: $e');
+  });
   audioHandler.attachNotifier(ttsNotifier);
   final router = createAppRouter(libraryNotifier);
   ClipboardListen(
     libraryNotifier,
     ttsNotifier,
     ttsReady,
-    (path) => router.go('/reader?path=${Uri.encodeComponent(path)}'),
+    (path) {
+      // Going to the note replaces every open screen, and an editor would
+      // lose what was typed. The note still plays and is in the library.
+      if (NoteEditorScreen.hasUnsavedChanges) return;
+      router.go('/reader?path=${Uri.encodeComponent(path)}');
+    },
   ).start();
 
   runApp(
@@ -94,8 +99,6 @@ void main() async {
       highlightService: highlightService,
       bookmarkService: bookmarkService,
       libraryNotifier: libraryNotifier,
-      deviceTts: deviceTts,
-      edgeTts: edgeTts,
       ttsNotifier: ttsNotifier,
       router: router,
     ),
@@ -108,8 +111,6 @@ class MainApp extends StatelessWidget {
   final HighlightService highlightService;
   final BookmarkService bookmarkService;
   final LibraryNotifier libraryNotifier;
-  final DeviceTtsEngine deviceTts;
-  final EdgeTtsEngine edgeTts;
   final TtsNotifier ttsNotifier;
   final GoRouter router;
 
@@ -120,8 +121,6 @@ class MainApp extends StatelessWidget {
     required this.highlightService,
     required this.bookmarkService,
     required this.libraryNotifier,
-    required this.deviceTts,
-    required this.edgeTts,
     required this.ttsNotifier,
     required this.router,
   });
@@ -134,15 +133,12 @@ class MainApp extends StatelessWidget {
         Provider.value(value: libraryService),
         Provider.value(value: highlightService),
         Provider.value(value: bookmarkService),
-        Provider.value(value: deviceTts),
-        Provider.value(value: edgeTts),
         Provider.value(value: prefs),
         ChangeNotifierProvider(
           create: (context) =>
               SettingsNotifier(context.read<SharedPreferences>()),
         ),
         ChangeNotifierProvider.value(value: libraryNotifier),
-        Provider<VelumAudioHandler>.value(value: audioHandler),
         ChangeNotifierProvider.value(value: ttsNotifier),
         ChangeNotifierProvider.value(value: ttsNotifier.phononModel),
       ],
@@ -158,10 +154,14 @@ class VelumApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final settingsNotifier = context.watch<SettingsNotifier>();
+    // Only the app theme matters here: watching all of the settings would
+    // rebuild the whole app on every slider tick.
+    final appTheme = context.select<SettingsNotifier, ReaderTheme>(
+      (notifier) => notifier.settings.appTheme,
+    );
 
     // Derive ThemeMode from the user's chosen appTheme
-    final themeMode = switch (settingsNotifier.settings.appTheme) {
+    final themeMode = switch (appTheme) {
       ReaderTheme.dark => ThemeMode.dark,
       _ => ThemeMode.light,
     };

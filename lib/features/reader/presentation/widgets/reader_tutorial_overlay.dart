@@ -12,7 +12,7 @@ class _TutorialStep {
   /// null = no spotlight (full dark overlay).
   final String? elementKey;
 
-  /// Extra padding radius around the widget bounds.
+  /// Extra room around the widget's bounds.
   final double spotlightPadding;
 
   const _TutorialStep({
@@ -29,7 +29,6 @@ class _TutorialStep {
 /// for pixel-perfect accuracy on any device.
 class ReaderTutorialOverlay extends StatefulWidget {
   final VoidCallback onDismiss;
-  final double bottomOffset;
 
   /// Keys attached to actual widgets in the reader UI. The overlay uses these
   /// to resolve real on-screen positions rather than guessing from constants.
@@ -39,7 +38,6 @@ class ReaderTutorialOverlay extends StatefulWidget {
     super.key,
     required this.onDismiss,
     required this.elementKeys,
-    this.bottomOffset = 0,
   });
 
   @override
@@ -49,6 +47,9 @@ class ReaderTutorialOverlay extends StatefulWidget {
 class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
     with SingleTickerProviderStateMixin {
   int _currentStep = 0;
+
+  /// The current step's spotlight, measured after layout.
+  Rect? _spotlight;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
@@ -107,7 +108,7 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
     _TutorialStep(
       title: 'Play / Pause TTS',
       description:
-          'Tap this button to start or pause\ntext-to-speech narration.\nThe ring around it shows how much\nof the chapter has been prepared.',
+          'Tap this button to start or pause\ntext-to-speech narration.\nThe badge on it shows how much\nof the chapter has been prepared.',
       icon: Icons.play_circle_outline_rounded,
       elementKey: 'fab',
       spotlightPadding: 16,
@@ -142,7 +143,10 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
 
   void _next() {
     if (_currentStep < _steps.length - 1) {
-      setState(() => _currentStep++);
+      setState(() {
+        _currentStep++;
+        _spotlight = _resolveSpotlight(_steps[_currentStep]);
+      });
     } else {
       _dismiss();
     }
@@ -152,37 +156,45 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
     _animController.reverse().then((_) => widget.onDismiss());
   }
 
-  /// Resolve the center + radius of a step's spotlight by looking up the
-  /// GlobalKey in [widget.elementKeys] and reading the real RenderBox bounds.
-  /// Returns null if no key is set or the widget isn't in the tree yet.
-  ({Offset center, double radius})? _resolveSpotlight(_TutorialStep step) {
+  /// The bounds of a step's target plus its padding, in this overlay's
+  /// coordinates. Null if the step has none or it isn't laid out.
+  Rect? _resolveSpotlight(_TutorialStep step) {
     final keyName = step.elementKey;
     if (keyName == null) return null;
 
-    final key = widget.elementKeys[keyName];
-    if (key == null) return null;
+    final target = widget.elementKeys[keyName]?.currentContext
+        ?.findRenderObject();
+    final overlay = context.findRenderObject();
+    if (target is! RenderBox || !target.attached || !target.hasSize) {
+      return null;
+    }
+    if (overlay is! RenderBox || !overlay.hasSize) return null;
 
-    final ctx = key.currentContext;
-    if (ctx == null) return null;
+    final topLeft = overlay.globalToLocal(target.localToGlobal(Offset.zero));
+    return (topLeft & target.size).inflate(step.spotlightPadding);
+  }
 
-    final box = ctx.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return null;
-
-    final size = box.size;
-    final topLeft = box.localToGlobal(Offset.zero);
-    final center = topLeft + Offset(size.width / 2, size.height / 2);
-    // Radius = half the largest dimension + padding
-    final radius = max(size.width, size.height) / 2 + step.spotlightPadding;
-
-    return (center: center, radius: radius);
+  /// The target's position is only known once the frame is laid out, and
+  /// moves when the window is rotated or resized: measure again after
+  /// every build.
+  void _measureAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final spotlight = _resolveSpotlight(_steps[_currentStep]);
+      if (spotlight != _spotlight) setState(() => _spotlight = spotlight);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenSize = MediaQuery.of(context).size;
+    // Read so that a rotate or resize rebuilds, and so measures again.
+    MediaQuery.sizeOf(context);
+    final safeArea = MediaQuery.paddingOf(context);
     final step = _steps[_currentStep];
-    final spotlight = _resolveSpotlight(step);
+    final spotlight = _spotlight;
     final isLastStep = _currentStep == _steps.length - 1;
+    final top = safeArea.top + 16;
+    _measureAfterLayout();
 
     return FadeTransition(
       opacity: _fadeAnimation,
@@ -194,8 +206,7 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
             Positioned.fill(
               child: CustomPaint(
                 painter: _SpotlightPainter(
-                  center: spotlight?.center,
-                  radius: spotlight?.radius ?? 40,
+                  spotlight: spotlight,
                   overlayColor: Colors.black.withAlpha((0.78 * 255).round()),
                 ),
               ),
@@ -210,15 +221,20 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
               ),
             ),
 
-            // Content card — positioned opposite the spotlight
-            _buildContentCard(step, spotlight?.center, screenSize),
-
-            // Page dots + navigation buttons
-            Positioned(
-              bottom: max(MediaQuery.of(context).padding.bottom + 16, 32),
-              left: 0,
-              right: 0,
-              child: _buildNavigation(isLastStep),
+            // Content card above the page dots + navigation buttons
+            Positioned.fill(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  top: top,
+                  bottom: max(safeArea.bottom + 16, 32),
+                ),
+                child: Column(
+                  children: [
+                    Expanded(child: _buildContentCard(step, spotlight, top)),
+                    _buildNavigation(isLastStep),
+                  ],
+                ),
+              ),
             ),
           ],
         ),
@@ -226,91 +242,110 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
     );
   }
 
-  Widget _buildContentCard(
-    _TutorialStep step,
-    Offset? spotlightCenter,
-    Size screenSize,
-  ) {
-    double top;
-    if (spotlightCenter == null) {
-      top = screenSize.height * 0.30;
-    } else if (spotlightCenter.dy > screenSize.height * 0.5) {
-      // Spotlight in lower half → card in upper area
-      top = screenSize.height * 0.18;
-    } else {
-      // Spotlight in upper half → card in lower area
-      top = screenSize.height * 0.52;
-    }
+  /// Below this much room beside the spotlight, the card uses the whole
+  /// area and may cover it.
+  static const double _minCardSpace = 200;
 
-    return Positioned(
-      top: top,
-      left: 32,
-      right: 32,
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 250),
-        transitionBuilder: (child, animation) => FadeTransition(
-          opacity: animation,
-          child: SlideTransition(
-            position: Tween<Offset>(
-              begin: const Offset(0, 0.1),
-              end: Offset.zero,
-            ).animate(animation),
-            child: child,
-          ),
-        ),
-        child: Container(
-          key: ValueKey(_currentStep),
-          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E1E1E),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: _accent.withAlpha((0.3 * 255).round()),
-              width: 1,
+  /// The card, in the space above the dots and buttons ([areaTop] is where
+  /// that space starts). It sits on the far side of the spotlight, and
+  /// scrolls when a short or landscape screen can't fit it.
+  Widget _buildContentCard(_TutorialStep step, Rect? spotlight, double areaTop) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final areaBottom = areaTop + constraints.maxHeight;
+        var above = 0.0, below = 0.0;
+        if (spotlight != null) {
+          if (spotlight.center.dy > (areaTop + areaBottom) / 2) {
+            // Spotlight in lower half → card above it
+            below = max(0, areaBottom - spotlight.top);
+          } else {
+            // Spotlight in upper half → card below it
+            above = max(0, spotlight.bottom - areaTop);
+          }
+          if (constraints.maxHeight - above - below < _minCardSpace) {
+            above = below = 0;
+          }
+        }
+
+        return Padding(
+          padding: EdgeInsets.only(top: above, bottom: below),
+          child: Center(
+            child: SingleChildScrollView(
+              // Room for the card's glow, which the scroll view clips.
+              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 24),
+              child: _buildCard(step),
             ),
-            boxShadow: [
-              BoxShadow(
-                color: _accent.withAlpha((0.08 * 255).round()),
-                blurRadius: 30,
-                spreadRadius: 2,
-              ),
-            ],
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 64,
-                height: 64,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: _accent.withAlpha((0.12 * 255).round()),
-                ),
-                child: Icon(step.icon, size: 32, color: _accent),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                step.title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.3,
-                ),
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                step.description,
-                style: TextStyle(
-                  color: Colors.white.withAlpha((0.7 * 255).round()),
-                  fontSize: 14,
-                  height: 1.5,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
+        );
+      },
+    );
+  }
+
+  Widget _buildCard(_TutorialStep step) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 250),
+      transitionBuilder: (child, animation) => FadeTransition(
+        opacity: animation,
+        child: SlideTransition(
+          position: Tween<Offset>(
+            begin: const Offset(0, 0.1),
+            end: Offset.zero,
+          ).animate(animation),
+          child: child,
+        ),
+      ),
+      child: Container(
+        key: ValueKey(_currentStep),
+        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1E1E),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: _accent.withAlpha((0.3 * 255).round()),
+            width: 1,
           ),
+          boxShadow: [
+            BoxShadow(
+              color: _accent.withAlpha((0.08 * 255).round()),
+              blurRadius: 30,
+              spreadRadius: 2,
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _accent.withAlpha((0.12 * 255).round()),
+              ),
+              child: Icon(step.icon, size: 32, color: _accent),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              step.title,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+                letterSpacing: 0.3,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              step.description,
+              style: TextStyle(
+                color: Colors.white.withAlpha((0.7 * 255).round()),
+                fontSize: 14,
+                height: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ),
       ),
     );
@@ -393,30 +428,31 @@ class _ReaderTutorialOverlayState extends State<ReaderTutorialOverlay>
   }
 }
 
-/// CustomPainter that draws a dark overlay with a transparent spotlight circle.
+/// Draws a dark overlay with the spotlight cut out of it. The cut-out is
+/// rounded to the target's shorter side: a circle around a button, a pill
+/// around something wide like the chapter name.
 class _SpotlightPainter extends CustomPainter {
-  final Offset? center;
-  final double radius;
+  final Rect? spotlight;
   final Color overlayColor;
 
-  _SpotlightPainter({
-    this.center,
-    this.radius = 40,
-    this.overlayColor = const Color(0xC8000000),
-  });
+  _SpotlightPainter({required this.spotlight, required this.overlayColor});
 
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()..color = overlayColor;
+    final spotlight = this.spotlight;
 
-    if (center == null) {
+    if (spotlight == null) {
       canvas.drawRect(Offset.zero & size, paint);
       return;
     }
 
+    final cutOut = RRect.fromRectAndRadius(
+      spotlight,
+      Radius.circular(spotlight.shortestSide / 2),
+    );
     final overlayPath = Path()..addRect(Offset.zero & size);
-    final spotlightPath = Path()
-      ..addOval(Rect.fromCircle(center: center!, radius: radius));
+    final spotlightPath = Path()..addRRect(cutOut);
 
     canvas.drawPath(
       Path.combine(PathOperation.difference, overlayPath, spotlightPath),
@@ -424,9 +460,8 @@ class _SpotlightPainter extends CustomPainter {
     );
 
     // Glow ring
-    canvas.drawCircle(
-      center!,
-      radius,
+    canvas.drawRRect(
+      cutOut,
       Paint()
         ..color = AppColors.accent.withAlpha((0.35 * 255).round())
         ..style = PaintingStyle.stroke
@@ -435,9 +470,8 @@ class _SpotlightPainter extends CustomPainter {
     );
 
     // Crisp ring
-    canvas.drawCircle(
-      center!,
-      radius,
+    canvas.drawRRect(
+      cutOut,
       Paint()
         ..color = AppColors.accent.withAlpha((0.6 * 255).round())
         ..style = PaintingStyle.stroke
@@ -447,5 +481,5 @@ class _SpotlightPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _SpotlightPainter old) =>
-      old.center != center || old.radius != radius;
+      old.spotlight != spotlight || old.overlayColor != overlayColor;
 }

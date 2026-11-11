@@ -6,14 +6,22 @@ import '../../data/services/library_service.dart';
 
 enum LibrarySortOption { recent, alphabetical }
 
+/// "1 book", "12 books".
+String booksLabel(int count) => '$count book${count == 1 ? '' : 's'}';
+
 class LibraryNotifier extends ChangeNotifier {
   final LibraryService _libraryService;
   final CollectionService _collectionService;
 
   LibraryNotifier(this._libraryService, this._collectionService) {
     _collections = _collectionService.load();
+    _currentSort =
+        LibrarySortOption.values
+            .where((option) => option.name == _libraryService.sortOption)
+            .firstOrNull ??
+        LibrarySortOption.recent;
     _loadBooks();
-    _initAutoScan();
+    refresh();
   }
 
   List<ScannedBook> _books = [];
@@ -112,9 +120,7 @@ class LibraryNotifier extends ChangeNotifier {
   // Cache sorted/filtered result to avoid recomputing on every access
   List<ScannedBook>? _sortedAndFilteredCache;
 
-  final bool _isLoading = false;
-  bool get isLoading => _isLoading;
-
+  /// True while a scan or an import is running; only one runs at a time.
   bool _isScanning = false;
   bool get isScanning => _isScanning;
 
@@ -186,6 +192,7 @@ class LibraryNotifier extends ChangeNotifier {
 
   void setSortOption(LibrarySortOption option) {
     _currentSort = option;
+    _libraryService.setSortOption(option.name);
     _sortedAndFilteredCache = null;
     notifyListeners();
   }
@@ -196,27 +203,21 @@ class LibraryNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Drop library entries whose files were deleted outside the app, and
-  /// take them out of collections too.
-  Future<void> _removeMissingBooks() async {
+  /// Bring the library in line with the device. With auto-scan on (and
+  /// storage access) that is a scan; otherwise books whose files were
+  /// deleted outside the app are dropped, from collections too.
+  Future<void> refresh() async {
+    if (_isScanning) return;
+    if (isAutoScanEnabled && await _libraryService.hasStoragePermission()) {
+      await scanDevice();
+      return;
+    }
     final missing = await _libraryService.removeMissingBooks();
-    if (missing.isEmpty) return;
-    for (final path in missing) {
-      await _collectionService.forgetBook(path);
+    if (missing.isNotEmpty) {
+      await _collectionService.forgetBooks(missing);
+      _collections = _collectionService.load();
     }
-    _collections = _collectionService.load();
     _loadBooks();
-  }
-
-  /// Initialize auto-scan on startup if enabled and permitted
-  Future<void> _initAutoScan() async {
-    await _removeMissingBooks();
-    if (_libraryService.isAutoScanEnabled) {
-      final hasPermission = await _libraryService.hasStoragePermission();
-      if (hasPermission) {
-        await scanDevice();
-      }
-    }
   }
 
   Future<void> completeOnboarding() async {
@@ -228,23 +229,21 @@ class LibraryNotifier extends ChangeNotifier {
   // PINNING & HISTORY
   // ════════════════════════════════════════════════════════════════════════════
 
-  Future<void> toggleBookPin(ScannedBook book) async {
-    await _libraryService.toggleBookPin(book.filePath);
+  Future<void> togglePins(Iterable<String> paths) async {
+    for (final path in paths) {
+      await _libraryService.toggleBookPin(path);
+    }
     _loadBooks();
   }
 
-  Future<void> updateLastRead(ScannedBook book) async {
-    await _libraryService.updateLastReadTime(book.filePath);
+  Future<void> updateLastRead(String path) async {
+    await _libraryService.updateLastReadTime(path);
     _loadBooks();
   }
 
   // ════════════════════════════════════════════════════════════════════════════
   // AUTO-SCAN
   // ════════════════════════════════════════════════════════════════════════════
-
-  Future<bool> hasStoragePermission() async {
-    return await _libraryService.hasStoragePermission();
-  }
 
   Future<bool> requestStoragePermission() async {
     return await _libraryService.requestStoragePermission();
@@ -255,15 +254,19 @@ class LibraryNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Scan the entire device for EPUB files
-  Future<void> scanDevice() async {
+  /// Look through the device for books: new ones are added, ones whose file
+  /// moved are followed and ones whose file is gone are dropped. Returns how
+  /// many new books were found, or null if a scan or an import was already
+  /// running.
+  Future<int?> scanDevice() async {
+    if (_isScanning) return null;
     _isScanning = true;
     _scanProgress = 0;
     notifyListeners();
 
     try {
       final stopwatch = Stopwatch()..start();
-      _books = await _libraryService.scanDeviceForEpubs(
+      final result = await _libraryService.scanDeviceForEpubs(
         onProgress: (count) {
           _scanProgress = count;
           // Throttle UI updates to max once every 500ms
@@ -273,12 +276,18 @@ class LibraryNotifier extends ChangeNotifier {
           }
         },
       );
+      if (result.moved.isNotEmpty) {
+        await _collectionService.moveBooks(result.moved);
+      }
+      if (result.removed.isNotEmpty) {
+        await _collectionService.forgetBooks(result.removed);
+      }
+      return result.added;
     } finally {
       _isScanning = false;
-      _sortedAndFilteredCache = null;
-      notifyListeners();
+      _collections = _collectionService.load();
+      _loadBooks();
     }
-    await _removeMissingBooks();
   }
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -287,33 +296,16 @@ class LibraryNotifier extends ChangeNotifier {
 
   /// Pick EPUB files and add them to library
   Future<void> pickFiles() async {
+    if (_isScanning) return;
     _isScanning = true;
     notifyListeners();
 
     try {
-      _books = await _libraryService.pickEpubFiles();
+      await _libraryService.pickEpubFiles();
     } finally {
       _isScanning = false;
-      _sortedAndFilteredCache = null;
-      notifyListeners();
+      _loadBooks();
     }
-  }
-
-  /// Alias for pickFiles - used by UI
-  Future<void> pickFolder() async {
-    await pickFiles();
-  }
-
-  Future<void> refresh() async {
-    await _removeMissingBooks();
-    if (isAutoScanEnabled) {
-      final hasPermission = await _libraryService.hasStoragePermission();
-      if (hasPermission) {
-        await scanDevice();
-        return;
-      }
-    }
-    _loadBooks();
   }
 
   Future<void> saveNote(String filePath, String title) async {
@@ -321,16 +313,23 @@ class LibraryNotifier extends ChangeNotifier {
     _loadBooks();
   }
 
-  /// See [LibraryService.removeBook]. Returns false if the device file
+  /// See [LibraryService.removeBook]. Returns how many device files
   /// couldn't be deleted.
-  Future<bool> removeBook(ScannedBook book, {bool deleteFile = false}) async {
-    final ok = await _libraryService.removeBook(
-      book.filePath,
-      deleteFile: deleteFile,
-    );
-    await _collectionService.forgetBook(book.filePath);
+  Future<int> removeBooks(
+    Iterable<String> paths, {
+    bool deleteFiles = false,
+  }) async {
+    var failed = 0;
+    for (final path in paths) {
+      final ok = await _libraryService.removeBook(
+        path,
+        deleteFile: deleteFiles,
+      );
+      if (!ok) failed++;
+    }
+    await _collectionService.forgetBooks(paths);
     _collections = _collectionService.load();
     _loadBooks();
-    return ok;
+    return failed;
   }
 }

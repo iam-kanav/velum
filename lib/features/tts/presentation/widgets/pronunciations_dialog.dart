@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:velum/core/theme/app_colors.dart';
 import '../../data/models/pronunciation.dart';
 import '../providers/tts_notifier.dart';
+import 'package:velum/core/motion/motion.dart';
 
 const Color _accent = AppColors.accent;
 
@@ -13,7 +14,7 @@ Future<void> showPronunciationsDialog(
   required Color textColor,
   required Color backgroundColor,
 }) {
-  return showDialog<void>(
+  return showMotionDialog<void>(
     context: context,
     builder: (ctx) => ListenableBuilder(
       listenable: tts,
@@ -174,18 +175,54 @@ Future<Pronunciation?> _showRuleEditor(
   required Color textColor,
   required Color backgroundColor,
 }) {
-  final written = TextEditingController(text: rule?.written);
-  final spoken = TextEditingController(text: rule?.spoken);
+  return showMotionDialog<Pronunciation>(
+    context: context,
+    builder: (ctx) => _RuleEditor(
+      rule: rule,
+      textColor: textColor,
+      backgroundColor: backgroundColor,
+    ),
+  );
+}
 
-  InputDecoration decoration(String label, String hint) => InputDecoration(
+/// A widget rather than a builder, so the text controllers are disposed of
+/// once the dialog has closed.
+class _RuleEditor extends StatefulWidget {
+  final Pronunciation? rule;
+  final Color textColor;
+  final Color backgroundColor;
+
+  const _RuleEditor({
+    required this.rule,
+    required this.textColor,
+    required this.backgroundColor,
+  });
+
+  @override
+  State<_RuleEditor> createState() => _RuleEditorState();
+}
+
+class _RuleEditorState extends State<_RuleEditor> {
+  late final _written = TextEditingController(text: widget.rule?.written);
+  late final _spoken = TextEditingController(text: widget.rule?.spoken);
+  late final _fields = Listenable.merge([_written, _spoken]);
+
+  @override
+  void dispose() {
+    _written.dispose();
+    _spoken.dispose();
+    super.dispose();
+  }
+
+  InputDecoration _decoration(String label, String hint) => InputDecoration(
     labelText: label,
     hintText: hint,
-    hintStyle: TextStyle(color: textColor.withAlpha(90)),
-    labelStyle: TextStyle(color: textColor.withAlpha(150)),
+    hintStyle: TextStyle(color: widget.textColor.withAlpha(90)),
+    labelStyle: TextStyle(color: widget.textColor.withAlpha(150)),
     floatingLabelStyle: const TextStyle(color: _accent),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
-      borderSide: BorderSide(color: textColor.withAlpha(60)),
+      borderSide: BorderSide(color: widget.textColor.withAlpha(60)),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
@@ -193,18 +230,23 @@ Future<Pronunciation?> _showRuleEditor(
     ),
   );
 
-  return showDialog<Pronunciation>(
-    context: context,
-    builder: (ctx) => ListenableBuilder(
-      listenable: Listenable.merge([written, spoken]),
+  @override
+  Widget build(BuildContext context) {
+    final rule = widget.rule;
+    final textColor = widget.textColor;
+    return ListenableBuilder(
+      listenable: _fields,
       builder: (ctx, _) {
-        final result = Pronunciation(written.text.trim(), spoken.text.trim());
+        final result = Pronunciation(
+          _written.text.trim(),
+          _spoken.text.trim(),
+        );
         void submit() {
           if (result.isComplete) Navigator.of(ctx).pop(result);
         }
 
         return AlertDialog(
-          backgroundColor: backgroundColor,
+          backgroundColor: widget.backgroundColor,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(24),
           ),
@@ -220,18 +262,18 @@ Future<Pronunciation?> _showRuleEditor(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
-                controller: written,
+                controller: _written,
                 autofocus: rule == null,
                 textInputAction: TextInputAction.next,
                 style: TextStyle(color: textColor, fontSize: 15.5),
-                decoration: decoration('Written as', 'majestic'),
+                decoration: _decoration('Written as', 'majestic'),
               ),
               const SizedBox(height: 12),
               TextField(
-                controller: spoken,
+                controller: _spoken,
                 onSubmitted: (_) => submit(),
                 style: TextStyle(color: textColor, fontSize: 15.5),
-                decoration: decoration('Read as', 'beautiful'),
+                decoration: _decoration('Read as', 'beautiful'),
               ),
             ],
           ),
@@ -254,6 +296,6 @@ Future<Pronunciation?> _showRuleEditor(
           ],
         );
       },
-    ),
-  );
+    );
+  }
 }

@@ -35,9 +35,9 @@ class SettingsNotifier extends ChangeNotifier {
     // Default to dark theme if the system is in dark mode, otherwise light
     final systemDefault =
         WidgetsBinding.instance.platformDispatcher.platformBrightness ==
-                Brightness.dark
-            ? ReaderTheme.dark.index
-            : ReaderTheme.light.index;
+            Brightness.dark
+        ? ReaderTheme.dark.index
+        : ReaderTheme.light.index;
 
     final appThemeIndex = _prefs.getInt(_appThemeKey) ?? systemDefault;
     final readerThemeIndex = _prefs.getInt(_readerThemeKey) ?? systemDefault;
@@ -51,12 +51,21 @@ class SettingsNotifier extends ChangeNotifier {
         _prefs.getDouble(_chapterSwipeDistanceKey) ?? 0.18;
 
     // Load custom fonts
-    List<CustomFont> customFonts = [];
+    final customFonts = <CustomFont>[];
     final customFontsJson = _prefs.getString(_customFontsKey);
     if (customFontsJson != null) {
       try {
-        final List<dynamic> decoded = jsonDecode(customFontsJson);
-        customFonts = decoded.map((e) => CustomFont.fromJson(e)).toList();
+        for (final entry in jsonDecode(customFontsJson) as List) {
+          // One by one: a font that can't be read is left out, instead of
+          // the next save replacing all of them with nothing.
+          try {
+            customFonts.add(
+              CustomFont.fromJson(Map<String, dynamic>.from(entry as Map)),
+            );
+          } catch (e) {
+            debugPrint('Skipping unreadable custom font: $e');
+          }
+        }
       } catch (e) {
         debugPrint('Error loading custom fonts: $e');
       }
@@ -75,7 +84,8 @@ class SettingsNotifier extends ChangeNotifier {
       fontSize: fontSize.clamp(12.0, 32.0),
       lineHeight: lineHeight.clamp(1.0, 2.5),
       paragraphSpacing: paragraphSpacing.clamp(0.0, 3.0),
-      textAlignment: TextAlignment.values[textAlignmentIndex.clamp(0, TextAlignment.values.length - 1)],
+      textAlignment: TextAlignment
+          .values[textAlignmentIndex.clamp(0, TextAlignment.values.length - 1)],
       horizontalMargin: horizontalMargin.clamp(0.0, 40.0),
       chapterSwipeDistance: chapterSwipeDistance.clamp(0.10, 0.40),
     );
@@ -90,12 +100,12 @@ class SettingsNotifier extends ChangeNotifier {
     _saveDebounce = Timer(const Duration(milliseconds: 300), _saveSettings);
   }
 
+  /// Saves everything but the themes: those are only saved when the user
+  /// picks one, so that until then they keep following the system.
   Future<void> _saveSettings() async {
     _saveDebounce?.cancel();
     // Batch all writes in parallel instead of sequential awaits
     final futures = <Future>[
-      _prefs.setInt(_appThemeKey, _settings.appTheme.index),
-      _prefs.setInt(_readerThemeKey, _settings.readerTheme.index),
       _prefs.setInt(_fontKey, _settings.font.index),
       _prefs.setDouble(_fontSizeKey, _settings.fontSize),
       _prefs.setDouble(_lineHeightKey, _settings.lineHeight),
@@ -123,13 +133,13 @@ class SettingsNotifier extends ChangeNotifier {
 
   void updateAppTheme(ReaderTheme theme) {
     _settings = _settings.copyWith(appTheme: theme);
-    _saveSettings();
+    _prefs.setInt(_appThemeKey, theme.index);
     notifyListeners();
   }
 
   void updateReaderTheme(ReaderTheme theme) {
     _settings = _settings.copyWith(readerTheme: theme);
-    _saveSettings();
+    _prefs.setInt(_readerThemeKey, theme.index);
     notifyListeners();
   }
 
@@ -139,15 +149,16 @@ class SettingsNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Import a custom font file (TTF or OTF)
-  Future<void> importCustomFont() async {
+  /// Import a custom font file (TTF or OTF). Returns false if a picked
+  /// file couldn't be added.
+  Future<bool> importCustomFont() async {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
         allowedExtensions: ['ttf', 'otf'],
       );
 
-      if (result != null && result.files.single.path != null) {
+      if (result != null) {
         final sourceFile = File(result.files.single.path!);
         final appDir = await getAppDataDirectory();
 
@@ -179,8 +190,10 @@ class SettingsNotifier extends ChangeNotifier {
         await _saveSettings();
         notifyListeners();
       }
+      return true;
     } catch (e) {
       debugPrint('Error importing font: $e');
+      return false;
     }
   }
 

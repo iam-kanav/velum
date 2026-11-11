@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -9,16 +10,10 @@ import '../providers/highlight_notifier.dart';
 import '../providers/bookmark_notifier.dart';
 import '../providers/reader_notifier.dart';
 import 'package:velum/core/theme/app_colors.dart';
+import 'reader_sheet.dart';
+import 'package:velum/core/motion/motion.dart';
 
 const Color _accent = AppColors.accent;
-
-const Map<String, Color> highlightColors = {
-  'yellow': Color(0xFFFFF176),
-  'green': Color(0xFF81C784),
-  'blue': Color(0xFF64B5F6),
-  'pink': Color(0xFFF48FB1),
-  'orange': Color(0xFFFFB74D),
-};
 
 class HighlightsModal extends StatefulWidget {
   const HighlightsModal({super.key});
@@ -31,6 +26,10 @@ class _HighlightsModalState extends State<HighlightsModal>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
 
+  /// Set briefly after "Copy all", to show it worked.
+  bool _copied = false;
+  Timer? _copiedTimer;
+
   @override
   void initState() {
     super.initState();
@@ -40,6 +39,7 @@ class _HighlightsModalState extends State<HighlightsModal>
   @override
   void dispose() {
     _tabController.dispose();
+    _copiedTimer?.cancel();
     super.dispose();
   }
 
@@ -51,104 +51,62 @@ class _HighlightsModalState extends State<HighlightsModal>
     final readerNotifier = context.read<ReaderNotifier>();
     final grouped = highlightNotifier.highlightsByColor;
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.55,
-      decoration: BoxDecoration(
-        color: readerTheme.backgroundColor,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        children: [
-          // Handle bar + header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 16, 8, 0),
-            child: Column(
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: readerTheme.textColor.withAlpha(60),
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      'Highlights & Bookmarks',
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        color: readerTheme.textColor,
-                      ),
-                    ),
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (grouped.isNotEmpty)
-                          IconButton(
-                            icon: Icon(Icons.copy, color: readerTheme.textColor, size: 20),
-                            tooltip: 'Copy All Highlights',
-                            onPressed: () {
-                              _copyAllHighlights(context, grouped, readerNotifier, readerTheme);
-                            },
-                          ),
-                        IconButton(
-                          icon: Icon(Icons.close, color: readerTheme.textColor),
-                          onPressed: () => Navigator.pop(context),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ],
+    return ReaderSheet(
+      readerTheme: readerTheme,
+      title: 'Highlights & Bookmarks',
+      actions: [
+        if (grouped.isNotEmpty)
+          IconButton(
+            icon: Icon(
+              _copied ? Icons.check : Icons.copy,
+              color: _copied ? _accent : readerTheme.textColor,
+              size: 20,
             ),
+            tooltip: _copied ? 'Copied' : 'Copy All Highlights',
+            onPressed: () => _copyAllHighlights(grouped, readerNotifier),
           ),
-          // Tab bar
-          TabBar(
+      ],
+      children: [
+        // Tab bar
+        TabBar(
+          controller: _tabController,
+          labelColor: _accent,
+          unselectedLabelColor: readerTheme.textColor.withAlpha(150),
+          indicatorColor: _accent,
+          tabs: [
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.highlight, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Highlights (${highlightNotifier.highlights.length})'),
+                ],
+              ),
+            ),
+            Tab(
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.bookmark, size: 16),
+                  const SizedBox(width: 6),
+                  Text('Bookmarks (${bookmarkNotifier.bookmarks.length})'),
+                ],
+              ),
+            ),
+          ],
+        ),
+        // Tab content
+        Expanded(
+          child: TabBarView(
             controller: _tabController,
-            labelColor: _accent,
-            unselectedLabelColor: readerTheme.textColor.withAlpha(150),
-            indicatorColor: _accent,
-            tabs: [
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.highlight, size: 16),
-                    const SizedBox(width: 6),
-                    Text('Highlights (${highlightNotifier.highlights.length})'),
-                  ],
-                ),
-              ),
-              Tab(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.bookmark, size: 16),
-                    const SizedBox(width: 6),
-                    Text('Bookmarks (${bookmarkNotifier.bookmarks.length})'),
-                  ],
-                ),
-              ),
+            children: [
+              _buildHighlightsTab(context, grouped, readerTheme, highlightNotifier, readerNotifier),
+              _buildBookmarksTab(context, bookmarkNotifier, readerNotifier, readerTheme),
             ],
           ),
-          // Tab content
-          Expanded(
-            child: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildHighlightsTab(context, grouped, readerTheme, highlightNotifier, readerNotifier),
-                _buildBookmarksTab(context, bookmarkNotifier, readerNotifier, readerTheme),
-              ],
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -236,11 +194,15 @@ class _HighlightsModalState extends State<HighlightsModal>
       itemCount: bookmarks.length,
       itemBuilder: (context, index) {
         final bm = bookmarks[index];
-        final chapters = readerNotifier.currentBook?.Chapters;
-        final chapterName = chapters != null && bm.chapterIndex < chapters.length
-            ? chapters[bm.chapterIndex].Title ?? 'Chapter ${bm.chapterIndex + 1}'
-            : 'Chapter ${bm.chapterIndex + 1}';
+        final chapterName = chapterTitle(
+          readerNotifier.currentBook?.Chapters,
+          bm.chapterIndex,
+        );
         final timeStr = DateFormat.yMMMd().add_jm().format(bm.createdAt);
+        // The label tells bookmarks in one chapter apart, unless it only
+        // repeats the chapter's name.
+        final label = bm.label?.trim() ?? '';
+        final hasLabel = label.isNotEmpty && label != chapterName;
 
         return InkWell(
           onTap: () {
@@ -264,12 +226,14 @@ class _HighlightsModalState extends State<HighlightsModal>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        chapterName,
+                        hasLabel ? label : chapterName,
+                        maxLines: hasLabel ? 2 : null,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(fontSize: 13, color: readerTheme.textColor, fontWeight: FontWeight.w500),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        timeStr,
+                        hasLabel ? '$chapterName · $timeStr' : timeStr,
                         style: TextStyle(fontSize: 11, color: readerTheme.textColor.withAlpha(120)),
                       ),
                     ],
@@ -289,12 +253,10 @@ class _HighlightsModalState extends State<HighlightsModal>
     );
   }
 
-  void _copyAllHighlights(
-    BuildContext context,
+  Future<void> _copyAllHighlights(
     Map<String, List<Highlight>> grouped,
     ReaderNotifier readerNotifier,
-    ReaderTheme readerTheme,
-  ) {
+  ) async {
     final chapters = readerNotifier.currentBook?.Chapters;
     final buffer = StringBuffer();
     final bookTitle = readerNotifier.currentBook?.Title ?? 'Unknown Book';
@@ -310,19 +272,21 @@ class _HighlightsModalState extends State<HighlightsModal>
 
     final sortedChapters = byChapter.keys.toList()..sort();
     for (final chIdx in sortedChapters) {
-      final chapterName = chapters != null && chIdx < chapters.length
-          ? chapters[chIdx].Title ?? 'Chapter ${chIdx + 1}'
-          : 'Chapter ${chIdx + 1}';
-      buffer.writeln('## $chapterName\n');
+      buffer.writeln('## ${chapterTitle(chapters, chIdx)}\n');
       for (final h in byChapter[chIdx]!) {
         buffer.writeln('> ${h.text}\n');
       }
     }
 
-    Clipboard.setData(ClipboardData(text: buffer.toString()));
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('All highlights copied to clipboard')),
-    );
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+    if (!mounted) return;
+    // Confirmed on the button: a SnackBar would show on the reader, hidden
+    // under this sheet.
+    setState(() => _copied = true);
+    _copiedTimer?.cancel();
+    _copiedTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
   }
 
   Widget _buildHighlightCard(
@@ -333,12 +297,10 @@ class _HighlightsModalState extends State<HighlightsModal>
     HighlightNotifier highlightNotifier,
     ReaderNotifier readerNotifier,
   ) {
-    final chapters = readerNotifier.currentBook?.Chapters;
-    final chapterName =
-        chapters != null && highlight.chapterIndex < chapters.length
-        ? chapters[highlight.chapterIndex].Title ??
-              'Chapter ${highlight.chapterIndex + 1}'
-        : 'Chapter ${highlight.chapterIndex + 1}';
+    final chapterName = chapterTitle(
+      readerNotifier.currentBook?.Chapters,
+      highlight.chapterIndex,
+    );
 
     return InkWell(
       onTap: () {
@@ -359,9 +321,7 @@ class _HighlightsModalState extends State<HighlightsModal>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    highlight.text.length > 120
-                        ? '${highlight.text.substring(0, 120)}...'
-                        : highlight.text,
+                    highlight.text,
                     style: TextStyle(
                       fontSize: 13,
                       color: readerTheme.textColor,
@@ -389,7 +349,7 @@ class _HighlightsModalState extends State<HighlightsModal>
                 color: readerTheme.textColor.withAlpha(120),
               ),
               onPressed: () {
-                showDialog(
+                showMotionDialog(
                   context: context,
                   builder: (ctx) => AlertDialog(
                     title: const Text('Delete highlight?'),

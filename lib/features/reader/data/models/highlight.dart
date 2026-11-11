@@ -1,6 +1,22 @@
-import 'package:equatable/equatable.dart';
+import 'dart:ui' show Color;
 
-class Highlight extends Equatable {
+/// The highlight colours by name, as they look on the page.
+const Map<String, Color> highlightColors = {
+  'yellow': Color(0xFFFFF176),
+  'green': Color(0xFF81C784),
+  'blue': Color(0xFF64B5F6),
+  'pink': Color(0xFFF48FB1),
+  'orange': Color(0xFFFFB74D),
+};
+
+/// The CSS colour a highlight called [name] is painted with in the reader.
+String highlightCss(String name) {
+  final c = highlightColors[name] ?? highlightColors['yellow']!;
+  int channel(double v) => (v * 255).round();
+  return 'rgba(${channel(c.r)}, ${channel(c.g)}, ${channel(c.b)}, 0.4)';
+}
+
+class Highlight {
   final String id;
   final String bookPath;
   final int chapterIndex;
@@ -42,7 +58,4 @@ class Highlight extends Equatable {
     endOffset: json['endOffset'] as int,
     createdAt: DateTime.parse(json['createdAt'] as String),
   );
-
-  @override
-  List<Object?> get props => [id, bookPath, chapterIndex, text, color, startOffset, endOffset, createdAt];
 }

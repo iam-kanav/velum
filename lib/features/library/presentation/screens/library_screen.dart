@@ -11,6 +11,8 @@ import 'package:velum/features/library/presentation/providers/library_notifier.d
 import 'package:velum/features/library/data/models/scanned_book.dart';
 import 'package:velum/core/theme/app_colors.dart';
 import 'package:velum/features/library/presentation/widgets/collections_ui.dart';
+import 'package:velum/features/tts/presentation/providers/tts_notifier.dart';
+import 'package:velum/core/motion/motion.dart';
 
 const Color _accent = AppColors.accent;
 
@@ -23,18 +25,49 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   final Set<String> _selectedBooks = {};
-  bool _selectionMode = false;
+  bool get _selectionMode => _selectedBooks.isNotEmpty;
   final TextEditingController _searchController = TextEditingController();
   Timer? _searchDebounce;
 
-  // Cache decoded cover images to avoid base64 decoding on every rebuild
+  late final LibraryNotifier _library = context.read<LibraryNotifier>();
+  String? _shownCollectionId;
+
+  /// When the screen opened: only cards built in its first moments rise in;
+  /// ones scrolled into view later just appear.
+  final DateTime _openedAt = DateTime.now();
+
+  // Decoded cover bytes of the books shown lately (least recently shown is
+  // dropped first), so a rebuild doesn't base64-decode every cover again.
+  static const int _coverCacheSize = 48;
   final Map<String, Uint8List> _coverCache = {};
 
   @override
+  void initState() {
+    super.initState();
+    _shownCollectionId = _library.currentCollection?.id;
+    _library.addListener(_onLibraryChanged);
+  }
+
+  @override
   void dispose() {
+    _library.removeListener(_onLibraryChanged);
     _searchController.dispose();
     _searchDebounce?.cancel();
     super.dispose();
+  }
+
+  /// A selection belongs to the list it was made in: it ends when another
+  /// collection is shown, and loses books that are no longer listed.
+  void _onLibraryChanged() {
+    final collectionId = _library.currentCollection?.id;
+    final sameList = collectionId == _shownCollectionId;
+    _shownCollectionId = collectionId;
+    if (_selectedBooks.isEmpty || !mounted) return;
+    final listed = sameList
+        ? {for (final book in _library.sortedAndFilteredBooks) book.filePath}
+        : const <String>{};
+    if (_selectedBooks.every(listed.contains)) return;
+    setState(() => _selectedBooks.retainAll(listed));
   }
 
   /// Debounce search input to avoid rebuilding the grid on every keystroke
@@ -42,28 +75,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 300), () {
       if (mounted) {
-        context.read<LibraryNotifier>().setSearchQuery(value);
+        _library.setSearchQuery(value);
       }
     });
   }
 
   void _toggleSelection(ScannedBook book) {
     setState(() {
-      if (_selectedBooks.contains(book.filePath)) {
-        _selectedBooks.remove(book.filePath);
-        if (_selectedBooks.isEmpty) {
-          _selectionMode = false;
-        }
-      } else {
+      if (!_selectedBooks.remove(book.filePath)) {
         _selectedBooks.add(book.filePath);
       }
-    });
-  }
-
-  void _startSelectionMode(ScannedBook book) {
-    setState(() {
-      _selectionMode = true;
-      _selectedBooks.add(book.filePath);
     });
   }
 
@@ -83,19 +104,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _cancelSelection() {
-    setState(() {
-      _selectionMode = false;
-      _selectedBooks.clear();
-    });
+    if (mounted) setState(_selectedBooks.clear);
   }
 
   void _deleteSelected() async {
-    final libraryNotifier = context.read<LibraryNotifier>();
-    final count = _selectedBooks.length;
-    final books = '$count book${count == 1 ? '' : 's'}';
+    final tts = context.read<TtsNotifier>();
+    // The selection can change while the dialog is up (a scan finishing).
+    final paths = Set.of(_selectedBooks);
     var deleteFiles = true;
 
-    final confirmed = await showDialog<bool>(
+    final confirmed = await showMotionDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
@@ -104,7 +122,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Remove $books from your library?'),
+              Text('Remove ${booksLabel(paths.length)} from your library?'),
               const SizedBox(height: 12),
               CheckboxListTile(
                 value: deleteFiles,
@@ -135,14 +153,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
 
     if (confirmed == true) {
-      var failed = 0;
-      for (final path in Set.of(_selectedBooks)) {
-        final ok = await libraryNotifier.removeBook(
-          ScannedBook(filePath: path, title: '', author: ''),
-          deleteFile: deleteFiles,
-        );
-        if (!ok) failed++;
+      // A deleted book must not go on being read aloud, or be resumed
+      // from the notification.
+      if (paths.contains(tts.bookPath)) {
+        await tts.closeBook();
       }
+      final failed = await _library.removeBooks(
+        paths,
+        deleteFiles: deleteFiles,
+      );
       _cancelSelection();
       if (failed > 0 && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -158,33 +177,35 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   void _togglePinSelected() async {
-    final libraryNotifier = context.read<LibraryNotifier>();
-    for (final path in _selectedBooks) {
-      // Find the book object to toggle
-      try {
-        final book = libraryNotifier.books.firstWhere(
-          (b) => b.filePath == path,
-        );
-        await libraryNotifier.toggleBookPin(book);
-      } catch (e) {
-        // Book not found, skip
-      }
-    }
+    await _library.togglePins(Set.of(_selectedBooks));
     _cancelSelection();
   }
 
   /// Decode and cache cover image bytes to avoid base64 decoding on every rebuild
   Uint8List _decodeCover(ScannedBook book) {
-    return _coverCache.putIfAbsent(
-      book.filePath,
-      () => base64Decode(book.coverBase64!),
-    );
+    final bytes =
+        _coverCache.remove(book.filePath) ?? base64Decode(book.coverBase64!);
+    // Re-inserted, so the map stays ordered from least to most recently shown.
+    _coverCache[book.filePath] = bytes;
+    if (_coverCache.length > _coverCacheSize) {
+      _coverCache.remove(_coverCache.keys.first);
+    }
+    return bytes;
   }
 
-  // Generate consistent color from title
-  Color _getBookColor(String title) {
+  /// Width in pixels to decode a cover at for a card [width] wide: the size
+  /// it's shown at, not the cover's full resolution. Rounded up to a step so
+  /// resizing the window doesn't decode every cover at every width.
+  int? _coverCacheWidth(BuildContext context, double width) {
+    if (!width.isFinite) return null;
+    final pixels = width * MediaQuery.devicePixelRatioOf(context);
+    return (pixels / 100).ceil() * 100;
+  }
+
+  // Generate a consistent color for a book from its file path
+  Color _getBookColor(String filePath) {
     // Use absolute value of hashCode to avoid negative numbers
-    final hash = title.hashCode.abs();
+    final hash = filePath.hashCode.abs();
     // Use a curated list of nice colors instead of primaries
     const colors = [
       Color(0xFF6366F1), // Indigo
@@ -254,16 +275,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
       barrierDismissible: true,
       barrierLabel: 'Close menu',
       barrierColor: Colors.black.withAlpha(25),
-      transitionDuration: const Duration(milliseconds: 160),
+      transitionDuration: Motion.fast,
       pageBuilder: (menuContext, _, _) => Stack(
         children: [
           Positioned(
             right: right,
             bottom: bottom,
             child: Material(
-              color: theme == ReaderTheme.dark
-                  ? const Color(0xFF2A2A2A)
-                  : Colors.white,
+              color: _getCardColor(theme),
               elevation: 8,
               shadowColor: Colors.black38,
               borderRadius: BorderRadius.circular(20),
@@ -295,17 +314,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
       // Grow out of the + button.
       transitionBuilder: (_, animation, _, child) {
-        final curved = CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-        );
-        return FadeTransition(
-          opacity: curved,
-          child: ScaleTransition(
-            scale: Tween(begin: 0.85, end: 1.0).animate(curved),
-            alignment: Alignment.bottomRight,
-            child: child,
+        return MotionReveal(
+          animation: CurvedAnimation(
+            parent: animation,
+            curve: Motion.smoothOut,
+            reverseCurve: const Interval(0.4, 1, curve: Curves.easeIn),
           ),
+          scale: 0.85,
+          alignment: Alignment.bottomRight,
+          child: child,
         );
       },
     );
@@ -313,9 +330,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final settingsNotifier = context.watch<SettingsNotifier>();
+    final theme = context.select<SettingsNotifier, ReaderTheme>(
+      (notifier) => notifier.settings.appTheme,
+    );
     final libraryNotifier = context.watch<LibraryNotifier>();
-    final theme = settingsNotifier.settings.appTheme;
     final books = libraryNotifier.sortedAndFilteredBooks;
 
     final collection = libraryNotifier.currentCollection;
@@ -339,7 +357,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         drawer: CollectionsDrawer(theme: theme),
         onDrawerChanged: (open) => setState(() => _drawerOpen = open),
         body: RefreshIndicator(
-          onRefresh: () => libraryNotifier.refresh(),
+          onRefresh: libraryNotifier.refresh,
           color: _accent,
           backgroundColor: theme.backgroundColor,
           child: CustomScrollView(
@@ -364,9 +382,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                       ),
                 title: _selectionMode
-                    ? Text(
-                        '${_selectedBooks.length} selected',
-                        style: TextStyle(color: theme.textColor),
+                    ? MotionSwap.text(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          '${_selectedBooks.length} selected',
+                          key: ValueKey(_selectedBooks.length),
+                          style: TextStyle(color: theme.textColor),
+                        ),
                       )
                     : null,
                 actions: [
@@ -389,9 +411,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     ),
                     IconButton(
                       icon: const Icon(Icons.delete_outline, color: Colors.red),
-                      onPressed: _selectedBooks.isNotEmpty
-                          ? _deleteSelected
-                          : null,
+                      onPressed: _deleteSelected,
                       tooltip: 'Delete',
                     ),
                   ] else
@@ -538,18 +558,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 )
               else if (books.isEmpty && collection != null)
                 SliverFillRemaining(
-                  child: Padding(
-                    padding: const EdgeInsets.all(40),
-                    child: Center(
-                      child: Text(
-                        'This collection is empty.\nLong-press books in All books, then tap the folder to add them here.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: theme.textColor.withAlpha(150),
-                          height: 1.5,
-                        ),
-                      ),
-                    ),
+                  child: _buildMessage(
+                    theme,
+                    'This collection is empty.\nLong-press books in All books, then tap the folder to add them here.',
+                  ),
+                )
+              else if (books.isEmpty && libraryNotifier.books.isNotEmpty)
+                // Every book is in a collection that keeps it out of here.
+                SliverFillRemaining(
+                  child: _buildMessage(
+                    theme,
+                    'All your books are in collections that only show them there.\nOpen the menu to find them.',
                   ),
                 )
               else if (books.isEmpty)
@@ -572,11 +591,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         ),
                     delegate: SliverChildBuilderDelegate((context, index) {
                       final book = books[index];
-                      return _buildBookItem(
-                        context,
-                        book,
-                        theme,
-                        libraryNotifier, // Pass notifier to handle tap updates
+                      return RevealIn(
+                        key: ValueKey(book.filePath),
+                        index: index.clamp(0, 9),
+                        step: Motion.stagger,
+                        duration: Motion.slow,
+                        animate:
+                            DateTime.now().difference(_openedAt) <
+                            Motion.verySlow,
+                        child: _buildBookItem(
+                          context,
+                          book,
+                          theme,
+                          libraryNotifier, // Pass notifier to handle tap updates
+                        ),
                       );
                     }, childCount: books.length),
                   ),
@@ -607,6 +635,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  Widget _buildMessage(ReaderTheme theme, String message) {
+    return Padding(
+      padding: const EdgeInsets.all(40),
+      child: Center(
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: TextStyle(color: theme.textColor.withAlpha(150), height: 1.5),
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmptyState(
     BuildContext context,
     ReaderTheme theme,
@@ -618,32 +659,40 @@ class _LibraryScreenState extends State<LibraryScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 100,
-              height: 100,
-              decoration: BoxDecoration(
-                color: _accent.withAlpha(20),
-                shape: BoxShape.circle,
+            RevealIn(
+              child: Container(
+                width: 100,
+                height: 100,
+                decoration: BoxDecoration(
+                  color: _accent.withAlpha(20),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.menu_book, size: 50, color: _accent),
               ),
-              child: const Icon(Icons.menu_book, size: 50, color: _accent),
             ),
             const SizedBox(height: 24),
-            Text(
-              'No Books Yet',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: theme.textColor,
+            RevealIn(
+              index: 1,
+              child: Text(
+                'No Books Yet',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: theme.textColor,
+                ),
               ),
             ),
             const SizedBox(height: 12),
-            Text(
-              'Add EPUB files from your device to build your library.',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 15,
-                color: theme.textColor.withAlpha(150),
-                height: 1.5,
+            RevealIn(
+              index: 2,
+              child: Text(
+                'Add EPUB files from your device to build your library.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 15,
+                  color: theme.textColor.withAlpha(150),
+                  height: 1.5,
+                ),
               ),
             ),
             const SizedBox(height: 32),
@@ -702,9 +751,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     LibraryNotifier notifier,
   ) {
     final isSelected = _selectedBooks.contains(book.filePath);
-    final bookColor = _getBookColor(
-      book.filePath,
-    ); // Use filePath for unique color per book
+    final bookColor = _getBookColor(book.filePath);
 
     return GestureDetector(
       onTap: () {
@@ -712,139 +759,163 @@ class _LibraryScreenState extends State<LibraryScreen> {
           _toggleSelection(book);
         } else {
           // Update last read time and navigate
-          notifier.updateLastRead(book);
+          notifier.updateLastRead(book.filePath);
           context.push('/reader?path=${Uri.encodeComponent(book.filePath)}');
         }
       },
       onLongPress: () {
         if (!_selectionMode) {
-          _startSelectionMode(book);
+          _toggleSelection(book);
         }
       },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        decoration: BoxDecoration(
-          color: _getCardColor(theme),
-          borderRadius: BorderRadius.circular(16),
-          border: isSelected ? Border.all(color: _accent, width: 3) : null,
-          boxShadow: [
-            BoxShadow(
-              color: isSelected
-                  ? _accent.withAlpha(40)
-                  : Colors.black.withAlpha(15),
-              blurRadius: isSelected ? 15 : 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Stack(
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                // Book cover
-                Expanded(
-                  flex: 3,
-                  child: ClipRRect(
-                    borderRadius: const BorderRadius.vertical(
-                      top: Radius.circular(16),
+      child: PressScale(
+        child: AnimatedContainer(
+          duration: Motion.fast,
+          curve: Motion.smoothOut,
+          decoration: BoxDecoration(
+            color: _getCardColor(theme),
+            borderRadius: BorderRadius.circular(16),
+            border: isSelected ? Border.all(color: _accent, width: 3) : null,
+            boxShadow: [
+              BoxShadow(
+                color: isSelected
+                    ? _accent.withAlpha(40)
+                    : Colors.black.withAlpha(15),
+                blurRadius: isSelected ? 15 : 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Stack(
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  // Book cover
+                  Expanded(
+                    flex: 3,
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(16),
+                      ),
+                      child: book.coverBase64 != null
+                          ? LayoutBuilder(
+                              builder: (context, constraints) => Image.memory(
+                                _decodeCover(book),
+                                fit: BoxFit.cover,
+                                width: double.infinity,
+                                cacheWidth: _coverCacheWidth(
+                                  context,
+                                  constraints.maxWidth,
+                                ),
+                                gaplessPlayback: true,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return _buildCoverPlaceholder(bookColor);
+                                },
+                              ),
+                            )
+                          : _buildCoverPlaceholder(bookColor),
                     ),
-                    child: book.coverBase64 != null
-                        ? Image.memory(
-                            _decodeCover(book),
-                            fit: BoxFit.cover,
-                            width: double.infinity,
-                            gaplessPlayback: true,
-                            errorBuilder: (context, error, stackTrace) {
-                              return _buildCoverPlaceholder(bookColor);
-                            },
-                          )
-                        : _buildCoverPlaceholder(bookColor),
                   ),
-                ),
-                // Book info
-                Expanded(
-                  flex: 2,
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          book.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: theme.textColor,
-                            height: 1.2,
+                  // Book info
+                  Expanded(
+                    flex: 2,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            book.title,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: theme.textColor,
+                              height: 1.2,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          book.author,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: theme.textColor.withAlpha(150),
+                          const SizedBox(height: 4),
+                          Text(
+                            book.author,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: theme.textColor.withAlpha(150),
+                            ),
                           ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              // Pin Indicator
+              if (book.isPinned && !isSelected)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(
+                      color: _accent,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withAlpha(50),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
                         ),
                       ],
                     ),
-                  ),
-                ),
-              ],
-            ),
-            // Pin Indicator
-            if (book.isPinned && !isSelected)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: BoxDecoration(
-                    color: _accent,
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withAlpha(50),
-                        blurRadius: 4,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: const Icon(
-                    Icons.push_pin,
-                    color: Colors.white,
-                    size: 14,
-                  ),
-                ),
-              ),
-            // Selection indicator
-            if (_selectionMode)
-              Positioned(
-                top: 8,
-                right: 8,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 28,
-                  height: 28,
-                  decoration: BoxDecoration(
-                    color: isSelected ? _accent : Colors.white,
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: isSelected ? _accent : Colors.grey,
-                      width: 2,
+                    child: const Icon(
+                      Icons.push_pin,
+                      color: Colors.white,
+                      size: 14,
                     ),
                   ),
-                  child: isSelected
-                      ? const Icon(Icons.check, color: Colors.white, size: 18)
-                      : null,
                 ),
-              ),
-          ],
+              // Selection indicator
+              if (_selectionMode)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  // Pops onto the card when selecting starts.
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.5, end: 1),
+                    duration: Motion.fast,
+                    curve: Motion.bounce,
+                    builder: (context, scale, child) =>
+                        Transform.scale(scale: scale, child: child),
+                    child: AnimatedContainer(
+                      duration: Motion.quick,
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: isSelected ? _accent : Colors.white,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: isSelected ? _accent : Colors.grey,
+                          width: 2,
+                        ),
+                      ),
+                      child: MotionSwap.icon(
+                        child: isSelected
+                            ? const Icon(
+                                Icons.check,
+                                key: ValueKey(true),
+                                color: Colors.white,
+                                size: 18,
+                              )
+                            : const SizedBox.shrink(key: ValueKey(false)),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

@@ -45,6 +45,10 @@ class DeviceTtsEngine extends TtsEngine {
   List<String> get engines => _engines;
   String? get defaultEngine => _defaultEngine;
 
+  /// The engine speaking now (Android only): the saved one, or the
+  /// system's when that one isn't installed any more.
+  String? get activeEngine => _activeEngine;
+
   static String engineLabel(String package) =>
       _knownEngines[package] ?? package;
 

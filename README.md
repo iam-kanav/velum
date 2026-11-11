@@ -8,7 +8,7 @@
 
 Open a book, press play, and follow along as each sentence lights up.
 
-![Flutter](https://img.shields.io/badge/Flutter-3.44-02569B?logo=flutter&logoColor=white)
+![Flutter](https://img.shields.io/badge/Flutter-3.47-02569B?logo=flutter&logoColor=white)
 ![Android](https://img.shields.io/badge/Android-7.0%2B-3DDC84?logo=android&logoColor=white)
 ![macOS](https://img.shields.io/badge/macOS-12%2B-000000?logo=apple&logoColor=white)
 ![License](https://img.shields.io/badge/license-Apache%202.0-5B3DE3)
@@ -59,7 +59,7 @@ Grab the latest APK from [**Releases**](https://github.com/iam-kanav/velum/relea
 
 ## 🚀 Getting started
 
-**Requirements:** [Flutter](https://docs.flutter.dev/get-started/install) 3.44+ and an Android device or emulator (Android 7.0+). For the Mac app: Xcode and [CocoaPods](https://cocoapods.org) (`brew install cocoapods`).
+**Requirements:** [Flutter](https://docs.flutter.dev/get-started/install) 3.47+ and an Android device or emulator (Android 7.0+). For the Mac app: Xcode and [CocoaPods](https://cocoapods.org) (`brew install cocoapods`).
 
 ```bash
 git clone https://github.com/iam-kanav/velum.git
@@ -148,12 +148,12 @@ When a chapter opens, a single pass marks every sentence on the page *and* recor
 
 | Area | Package |
 |---|---|
-| Framework | Flutter, Dart 3.8 |
+| Framework | Flutter, Dart 3.11 |
 | State | `provider` |
 | Navigation | `go_router` |
 | EPUB parsing | `epubx` |
 | Rendering | `webview_flutter` + `assets/js/reader.js` |
-| Speech | `flutter_tts` (device), `edge_tts` (neural, online) |
+| Speech | `flutter_tts` (device), `edge_tts` (neural, online), Phonon (neural, on-device: Rust in `native/phonon` over `dart:ffi`) |
 | Audio | `just_audio`, `audio_service`, `audio_session` |
 | Storage | `hive`, `shared_preferences` |
 
@@ -167,7 +167,7 @@ When a chapter opens, a single pass marks every sentence on the page *and* recor
 ```
 lib/
 ├── main.dart                 # Startup: storage, audio service, providers
-├── core/                     # Router and theme
+├── core/                     # Router, theme, motion and storage
 └── features/
     ├── library/              # Library screen, collections, scanning, imports
     ├── notes/                # Note editor and note storage

@@ -5,33 +5,24 @@ import 'dart:io';
 import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
-import 'package:just_audio/just_audio.dart';
 import '../models/tts_settings.dart';
-import 'bytes_audio_source.dart';
 import 'phonon_bindings.dart' as native;
 import 'phonon_model.dart';
+import 'player_tts_engine.dart';
 import 'tts_engine.dart';
 
 /// Phonon (gradium-ai/xn-ptts), a small neural voice
 /// that runs on the device, offline. The model is downloaded from the voice
 /// settings ([PhononModel]). A worker isolate turns each chunk into a WAV,
 /// a few chunks ahead of the one playing, and just_audio plays it.
-class PhononTtsEngine extends TtsEngine {
+class PhononTtsEngine extends PlayerTtsEngine {
   final PhononModel _model;
   PhononTtsEngine(this._model);
 
-  // TtsNotifier handles interruptions for every engine.
-  final AudioPlayer _player = AudioPlayer(handleInterruptions: false);
-
   _Worker? _worker;
   Future<void>? _loading;
-  bool _listening = false;
   List<TtsVoice> _voices = [];
   String _voice = _defaultVoice;
-  bool _playing = false;
-
-  /// Incremented on every speak()/stop() so stale async work is ignored.
-  int _speakGeneration = 0;
 
   /// The chunk speak() is waiting on, kept when [prepare] drops the rest.
   String? _speakingKey;
@@ -52,27 +43,14 @@ class PhononTtsEngine extends TtsEngine {
   static const _lookahead = 3;
   static const _defaultVoice = 'default';
 
-  bool get isLoaded => _worker != null;
-
   @override
   List<TtsVoice> get voices => _voices;
   @override
-  bool get supportsResume => true;
+  String get mimeType => 'audio/wav';
 
   /// Load the downloaded model. Throws if it can't be loaded.
   @override
   Future<void> init() {
-    if (!_listening) {
-      _listening = true;
-      // Only fire onComplete while playing, so stale events from a previous
-      // audio source (after stop/replace) are ignored.
-      _player.processingStateStream.listen((state) {
-        if (state == ProcessingState.completed && _playing) {
-          _playing = false;
-          onComplete?.call();
-        }
-      });
-    }
     if (_worker != null) return Future.value();
     return _loading ??= _load().whenComplete(() => _loading = null);
   }
@@ -90,6 +68,12 @@ class PhononTtsEngine extends TtsEngine {
         : cores.clamp(1, 4);
     final worker = await _Worker.spawn(path, threads);
     worker.onResult = _onResult;
+    worker.onDied = (reason) {
+      if (!identical(_worker, worker)) return;
+      debugPrint('The Phonon worker died: $reason');
+      _worker = null;
+      _failAll(StateError('The Phonon voice stopped working ($reason)'));
+    };
     _worker = worker;
 
     _voices = [
@@ -119,18 +103,25 @@ class PhononTtsEngine extends TtsEngine {
   /// Free the model, e.g. before its files are deleted.
   Future<void> unload() async {
     await stop();
+    // A load still running would bring the worker back after this.
+    try {
+      await _loading;
+    } catch (_) {}
     clearCache();
     _worker?.dispose();
     _worker = null;
+    // Its reply to the job in flight will never come: forget the job, or
+    // the next worker would wait behind it for ever.
+    _failAll(const _Cancelled());
     _voices = [];
   }
 
   @override
   Future<void> applySettings(TtsSettings settings) async {
-    // speechRate is stored with 0.5 = 1x. Phonon has no rate control, so
-    // speed up playback (pitch-preserving) instead.
-    await _player.setSpeed((settings.speechRate * 2).clamp(0.2, 4.0));
-    await _player.setVolume(settings.volume);
+    // Phonon has no rate control, so speed up playback (pitch-preserving)
+    // instead.
+    await player.setSpeed(settings.speed.clamp(0.2, 4.0));
+    await player.setVolume(settings.volume);
 
     final wanted = settings.phononVoice;
     final voice = _voices.any((v) => v.id == wanted)
@@ -138,7 +129,9 @@ class PhononTtsEngine extends TtsEngine {
         : voicesFor(settings.language).firstOrNull?.id ?? _defaultVoice;
     if (voice != _voice) {
       _voice = voice;
-      clearCache();
+      // A chunk speak() is waiting for is asked for again in the new voice.
+      _drop(reason: const _Cancelled(voiceChanged: true));
+      _cache.clear();
     }
   }
 
@@ -201,16 +194,30 @@ class PhononTtsEngine extends TtsEngine {
     _pump();
   }
 
+  /// Fail everything queued or being synthesised, for a worker that is gone.
+  void _failAll(Object error) {
+    _queue.clear();
+    _inFlight = null;
+    final waiting = _pending.values.toList();
+    _pending.clear();
+    for (final completer in waiting) {
+      completer.completeError(error);
+    }
+  }
+
   /// Stop synthesising everything but [keep], failing their futures.
-  void _drop({Set<String> keep = const {}}) {
+  void _drop({
+    Set<String> keep = const {},
+    _Cancelled reason = const _Cancelled(),
+  }) {
     _queue.removeWhere((job) {
       if (keep.contains(job.key)) return false;
-      _pending.remove(job.key)?.completeError(const _Cancelled());
+      _pending.remove(job.key)?.completeError(reason);
       return true;
     });
     final inFlight = _inFlight;
     if (inFlight != null && !keep.contains(inFlight.key)) {
-      _pending.remove(inFlight.key)?.completeError(const _Cancelled());
+      _pending.remove(inFlight.key)?.completeError(reason);
       _worker?.cancel();
     }
   }
@@ -247,64 +254,43 @@ class PhononTtsEngine extends TtsEngine {
   }
 
   @override
-  Future<void> speak(String text) async {
-    if (text.isEmpty) return;
-    final gen = ++_speakGeneration;
-
-    // Stop first so replacing the source doesn't fire a 'completed' event.
-    _playing = false;
-    await _player.stop();
-
-    try {
+  Future<Uint8List?> audioFor(String text, bool Function() isCurrent) async {
+    // Its worker died: start another.
+    if (_worker == null) await init();
+    while (isCurrent()) {
       _speakingKey = _cacheKey(text);
-      final wav = await _getAudio(text, urgent: true);
-      if (gen != _speakGeneration) return;
-      _speakingKey = null;
-      _failures = 0;
-
-      if (wav.length <= _wavHeaderSize) {
-        onComplete?.call();
-        return;
+      try {
+        final wav = await _getAudio(text, urgent: true);
+        if (!isCurrent()) break;
+        _speakingKey = null;
+        _failures = 0;
+        return wav.length > _wavHeaderSize ? wav : null;
+      } catch (e) {
+        if (!isCurrent()) break;
+        _speakingKey = null;
+        if (e is _Cancelled) {
+          // Dropped because the voice changed: ask again in the new one.
+          if (e.voiceChanged) continue;
+          // Dropped with the rest of the chapter: there's nothing to say,
+          // and no error to report either.
+          abandonSpeak();
+        } else if (e is _SynthesisError && ++_failures <= 3) {
+          debugPrint('Phonon skipped a chunk: ${e.message}');
+        } else {
+          rethrow;
+        }
+        break;
       }
-
-      await _player.setAudioSource(BytesAudioSource(wav, 'audio/wav'));
-      if (gen != _speakGeneration) return;
-      _playing = true;
-      // play()'s future only completes when playback ends, so don't await it.
-      _player.play().ignore();
-      onStart?.call();
-    } catch (e) {
-      if (gen != _speakGeneration) return;
-      _speakingKey = null;
-      _playing = false;
-      if (e is _SynthesisError && ++_failures <= 3) {
-        debugPrint('Phonon skipped a chunk: ${e.message}');
-        onComplete?.call();
-        return;
-      }
-      onError?.call(e.toString());
     }
+    return null;
   }
 
   @override
-  Future<void> stop() async {
-    _speakGeneration++;
-    _speakingKey = null;
-    _playing = false;
-    await _player.stop();
-  }
+  void onSpeakAbandoned() => _speakingKey = null;
 
   @override
-  Future<void> pause() async {
-    _playing = false;
-    await _player.pause();
-  }
-
-  @override
-  Future<void> resume() async {
-    _playing = true;
-    _player.play().ignore();
-  }
+  String describeError(Object error) =>
+      error is StateError ? error.message : '$error';
 
   @override
   void clearCache() {
@@ -322,7 +308,10 @@ class _Job {
 }
 
 class _Cancelled implements Exception {
-  const _Cancelled();
+  /// Whether the work was dropped because the voice changed, in which case
+  /// it's still wanted, in the new voice.
+  final bool voiceChanged;
+  const _Cancelled({this.voiceChanged = false});
   @override
   String toString() => 'Cancelled';
 }
@@ -381,23 +370,39 @@ class _Worker {
   final List<String> voices;
   void Function(int id, Object? result)? onResult;
 
+  /// Called if the isolate ends by itself, which leaves its work unfinished.
+  void Function(String reason)? onDied;
+
   _Worker._(this._requests, this._replies, this._cancelToken, this.voices);
 
   static Future<_Worker> spawn(String dir, int threads) async {
     final replies = ReceivePort();
     final ready = Completer<_Worker>();
+    // A failure can arrive before anyone is waiting for it below.
+    ready.future.ignore();
     _Worker? worker;
     replies.listen((message) {
-      if (worker != null) {
-        final (id, result) = message as (int, Object?);
-        worker!.onResult?.call(id, result);
+      if (message is (int, Object?) && worker != null) {
+        worker!.onResult?.call(message.$1, message.$2);
       } else if (message is (SendPort, int, List<String>)) {
         final (requests, token, voices) = message;
         worker = _Worker._(requests, replies, token, voices);
         ready.complete(worker);
       } else {
+        // The isolate is gone: it couldn't load the model (a String says
+        // why), threw ([error, stack trace]) or just exited (null). Without
+        // this, whoever waits for it would wait for ever.
         replies.close();
-        ready.completeError(StateError('$message'));
+        final reason = switch (message) {
+          final String why => why,
+          [final error, ...] => '$error',
+          _ => 'it exited unexpectedly',
+        };
+        if (!ready.isCompleted) {
+          ready.completeError(StateError(reason));
+        } else {
+          worker?.onDied?.call(reason);
+        }
       }
     });
     try {
@@ -405,6 +410,8 @@ class _Worker {
         _workerMain,
         (replies.sendPort, dir, threads),
         debugName: 'phonon',
+        onError: replies.sendPort,
+        onExit: replies.sendPort,
       );
     } catch (e) {
       replies.close();
@@ -443,7 +450,7 @@ void _workerMain((SendPort, String, int) args) {
         threads,
       ));
   if (handle == nullptr) {
-    replies.send(lastError(nullptr) ?? 'Could not load the Phonon voice');
+    replies.send(lastError(nullptr) ?? 'unknown error');
     return;
   }
 

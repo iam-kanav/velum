@@ -54,7 +54,14 @@ var KEEP = { H1:1, H2:1, H3:1, H4:1, H5:1, H6:1, P:1, UL:1, OL:1, LI:1,
 var DROP = { SCRIPT:1, STYLE:1, META:1, LINK:1, TITLE:1, IMG:1, SVG:1,
   VIDEO:1, AUDIO:1, IFRAME:1, OBJECT:1, BUTTON:1, INPUT:1, SELECT:1,
   TEXTAREA:1, NOSCRIPT:1, HEAD:1 };
-var BLOCKS = /^(P|DIV|H[1-6]|UL|OL|LI|BLOCKQUOTE|PRE|TABLE|TR|HR|SECTION|ARTICLE)$/;
+// Blocks that aren't kept as they are. Each becomes a paragraph, so its text
+// isn't glued to its neighbours' ("TermDef").
+var PARA = { DIV:1, SECTION:1, ARTICLE:1, DT:1, DD:1, FIGCAPTION:1, HEADER:1,
+  FOOTER:1, ASIDE:1, CENTER:1, ADDRESS:1, MAIN:1, NAV:1 };
+var BLOCKS = /^(P|DIV|H[1-6]|UL|OL|LI|BLOCKQUOTE|PRE|TABLE|TR|HR|SECTION|ARTICLE|DL|DT|DD|FIGURE|FIGCAPTION|HEADER|FOOTER|ASIDE|CENTER|ADDRESS|MAIN|NAV)$/;
+// Web and mail links only: a pasted javascript: link would otherwise be
+// saved into the note's EPUB.
+var SAFE_HREF = /^(https?|mailto):/i;
 
 function cleanNode(node, out) {
   for (var c = node.firstChild; c; c = c.nextSibling) {
@@ -66,9 +73,12 @@ function cleanNode(node, out) {
     var target = out;
     if (KEEP[tag]) {
       target = document.createElement(tag);
-      if (tag === 'A' && c.getAttribute('href')) target.setAttribute('href', c.getAttribute('href'));
+      if (tag === 'A') {
+        var href = (c.getAttribute('href') || '').trim();
+        if (SAFE_HREF.test(href)) target.setAttribute('href', href);
+      }
       out.appendChild(target);
-    } else if (tag === 'DIV' || tag === 'SECTION' || tag === 'ARTICLE') {
+    } else if (PARA[tag]) {
       // A div holding only inline content is a paragraph; otherwise unwrap.
       var hasBlock = false;
       for (var k = c.firstChild; k; k = k.nextSibling) {

@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart' show StringCharacters;
 
 import '../../library/presentation/providers/library_notifier.dart';
 import '../../reader/data/services/chapter_processor.dart';
@@ -53,20 +54,38 @@ class ClipboardListen {
   }
 
   bool _busy = false;
+  bool _tappedAgain = false;
 
   Future<void> _takePending() async {
-    if (_busy) return;
+    // A tap during a run is picked up by that run, not dropped.
+    if (_busy) {
+      _tappedAgain = true;
+      return;
+    }
     _busy = true;
     try {
-      final text = await _channel.invokeMethod<String>('takePending');
-      if (text != null && text.trim().isNotEmpty) await listen(text);
+      while (true) {
+        _tappedAgain = false;
+        final text = await _channel.invokeMethod<String>('takePending');
+        if (text != null && text.trim().isNotEmpty) {
+          try {
+            await listen(text);
+          } catch (e) {
+            debugPrint('Listening to the clipboard failed: $e');
+          }
+        } else if (!_tappedAgain) {
+          break;
+        }
+      }
     } on MissingPluginException {
       // Started without the native side attached: nothing was tapped.
     } catch (e) {
       debugPrint('Listening to the clipboard failed: $e');
     } finally {
       _busy = false;
-      // Let the native pill close.
+      // Let the native pill close. Only now: the native side keeps one
+      // pill, the latest tap's, and it has to stay up until that tap's text
+      // is playing.
       try {
         await _channel.invokeMethod('done');
       } on MissingPluginException {
@@ -125,9 +144,11 @@ class ClipboardListen {
   static String _title(String firstLine) {
     const max = 60;
     if (firstLine.isEmpty) return 'Clipboard';
-    if (firstLine.length <= max) return firstLine;
-    final cut = firstLine.substring(0, max);
+    // By characters: cutting code units can split an emoji in two.
+    final characters = firstLine.characters;
+    if (characters.length <= max) return firstLine;
+    final cut = characters.take(max).toString();
     final space = cut.lastIndexOf(' ');
-    return '${(space > max ~/ 2 ? cut.substring(0, space) : cut).trimRight()}…';
+    return '${(space > cut.length ~/ 2 ? cut.substring(0, space) : cut).trimRight()}…';
   }
 }

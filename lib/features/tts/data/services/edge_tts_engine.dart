@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:collection';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:edge_tts/edge_tts.dart';
-import 'package:just_audio/just_audio.dart';
 import '../models/tts_settings.dart';
-import 'bytes_audio_source.dart';
+import 'player_tts_engine.dart';
 import 'tts_engine.dart';
 
 /// LRU cache for synthesized audio chunks.
@@ -12,7 +13,7 @@ class _AudioCache {
   final int maxSize;
   final LinkedHashMap<String, Uint8List> _map = LinkedHashMap();
 
-  _AudioCache({this.maxSize = 40});
+  _AudioCache({required this.maxSize});
 
   Uint8List? get(String key) {
     final value = _map.remove(key);
@@ -36,28 +37,29 @@ class _AudioCache {
 }
 
 /// Microsoft Edge neural voices (online) played via just_audio.
-class EdgeTtsEngine extends TtsEngine {
-  // TtsNotifier handles interruptions for both engines. Left on, the player
-  // also paused and resumed itself whenever another app made a sound, even
-  // with "pause for other audio" turned off.
-  final AudioPlayer _player = AudioPlayer(handleInterruptions: false);
-
+class EdgeTtsEngine extends PlayerTtsEngine {
   List<TtsVoice> _voices = [];
-  bool _initialized = false;
-  bool _playing = false;
+  Future<void>? _loadingVoices;
 
   // Synthesis parameters
   String _voice = 'en-US-EmmaMultilingualNeural';
   String _rate = '+0%';
   String _pitch = '+0Hz';
-  double _volume = 1.0;
 
   /// Cache key incorporates voice + rate + pitch so settings changes
   /// correctly invalidate stale entries.
   String _settingsFingerprint = '';
 
+  static const _cacheSize = 40;
+
+  /// How many chunks [prepare] synthesises ahead of the playback position.
+  /// Fewer than the cache holds, so they aren't evicted before they're
+  /// played; speak() and [prefetch] keep a few ahead from there on.
+  static const _prepareWindow = 30;
+  static const _prepareConcurrency = 3;
+
   /// LRU audio cache — avoids re-synthesis when navigating back & forth
-  final _AudioCache _cache = _AudioCache(maxSize: 40);
+  final _AudioCache _cache = _AudioCache(maxSize: _cacheSize);
 
   /// In-flight synthesis futures keyed by cache key
   final Map<String, Future<Uint8List>> _pendingSynths = {};
@@ -66,8 +68,14 @@ class EdgeTtsEngine extends TtsEngine {
   int _batchTotal = 0;
   int _batchDone = 0;
 
-  /// Incremented on every speak()/stop() so stale async work is ignored.
-  int _speakGeneration = 0;
+  /// Incremented by every [prepare] and [clearCache], which ends the
+  /// previous batch.
+  int _prepareGeneration = 0;
+
+  /// What the current batch still has to start, and how many syntheses
+  /// started by [prepare] (this batch or an earlier one) are running.
+  final Queue<String> _prepareQueue = Queue();
+  int _prepareRunning = 0;
 
   @override
   List<TtsVoice> get voices => _voices;
@@ -76,24 +84,25 @@ class EdgeTtsEngine extends TtsEngine {
   @override
   int get preparedCount => _batchDone;
   @override
-  bool get supportsResume => true;
+  String get mimeType => 'audio/mpeg';
 
+  // Without these a stalled connection never fails, and reading sits in
+  // "playing" with no sound. A paragraph normally takes a second or two.
+  static const _voiceListTimeout = Duration(seconds: 15);
+  static const _synthesisTimeout = Duration(seconds: 30);
+
+  /// Fetches the voice list. It never throws: with no connection the list
+  /// stays empty, and calling this again tries once more.
   @override
-  Future<void> init() async {
-    if (_initialized) return;
-    _initialized = true;
+  Future<void> init() {
+    if (_voices.isNotEmpty) return Future.value();
+    return _loadingVoices ??=
+        _loadVoices().whenComplete(() => _loadingVoices = null);
+  }
 
-    // Only fire onComplete while playing, so stale events from a previous
-    // audio source (after stop/replace) are ignored.
-    _player.processingStateStream.listen((processingState) {
-      if (processingState == ProcessingState.completed && _playing) {
-        _playing = false;
-        onComplete?.call();
-      }
-    });
-
+  Future<void> _loadVoices() async {
     try {
-      _voices = (await listVoices())
+      _voices = (await listVoices().timeout(_voiceListTimeout))
           .map(
             (v) => TtsVoice(
               id: v.shortName,
@@ -104,8 +113,15 @@ class EdgeTtsEngine extends TtsEngine {
           .toList();
     } catch (e) {
       debugPrint('Failed to fetch Edge TTS voices: $e');
-      _initialized = false; // retry next time
     }
+  }
+
+  @override
+  String describeError(Object error) {
+    debugPrint('Edge TTS failed: $error');
+    return error is IOException || error is TimeoutException
+        ? 'Couldn\'t reach the Microsoft Edge voices. Check your connection.'
+        : 'The Microsoft Edge voice failed: $error';
   }
 
   /// 'en-US-EmmaNeural' + 'Female' → 'Emma (Female)';
@@ -127,21 +143,20 @@ class EdgeTtsEngine extends TtsEngine {
 
   @override
   Future<void> applySettings(TtsSettings settings) async {
-    // speechRate is stored with 0.5 = 1x. Edge caps synthesis at 2x ('+100%')
-    // and silently ignores anything faster, so synthesise at up to 2x and
-    // speed up playback (pitch-preserving) for the rest, up to 4x.
-    final speed = settings.speechRate * 2;
+    // Edge caps synthesis at 2x ('+100%') and silently ignores anything
+    // faster, so synthesise at up to 2x and speed up playback
+    // (pitch-preserving) for the rest, up to 4x.
+    final speed = settings.speed;
     final synthSpeed = speed.clamp(0.1, 2.0);
     final ratePercent = (synthSpeed - 1) * 100;
     _rate = '${ratePercent >= 0 ? '+' : ''}${ratePercent.round()}%';
-    await _player.setSpeed(speed / synthSpeed);
+    await player.setSpeed(speed / synthSpeed);
 
     // pitch (0.5–2.0, default 1.0) → '+0Hz' at 1.0, '-50Hz' at 0.5, '+100Hz' at 2.0
     final pitchHz = (settings.pitch - 1.0) * 100;
     _pitch = '${pitchHz >= 0 ? '+' : ''}${pitchHz.round()}Hz';
 
-    _volume = settings.volume;
-    await _player.setVolume(_volume);
+    await player.setVolume(settings.volume);
 
     final voice = settings.edgeVoice;
     if (voice != null) {
@@ -168,18 +183,20 @@ class EdgeTtsEngine extends TtsEngine {
     final pending = _pendingSynths[key];
     if (pending != null) return pending;
 
-    final future = Communicate(
+    // After clearCache() the result belongs to old settings or a chapter
+    // already left: hand it to whoever is waiting, but don't keep it.
+    late final Future<Uint8List> future;
+    bool current() => identical(_pendingSynths[key], future);
+    future = Communicate(
       text: text,
       voice: _voice,
       rate: _rate,
       pitch: _pitch,
-    ).toBytes().then((bytes) {
-      _cache.put(key, bytes);
-      _pendingSynths.remove(key);
+    ).toBytes().timeout(_synthesisTimeout).then((bytes) {
+      if (current()) _cache.put(key, bytes);
       return bytes;
-    }).catchError((Object e) {
-      _pendingSynths.remove(key);
-      throw e;
+    }).whenComplete(() {
+      if (current()) _pendingSynths.remove(key);
     });
 
     _pendingSynths[key] = future;
@@ -194,92 +211,55 @@ class EdgeTtsEngine extends TtsEngine {
     _getAudio(text).ignore();
   }
 
-  /// Synthesize all chunk texts in the background (3 at a time), starting at
-  /// [startFrom] and wrapping around, so playback mid-chapter never waits
-  /// on earlier chunks.
+  /// Synthesize the chunks from [startFrom] on in the background, a few at
+  /// a time, in place of whatever an earlier call still had to do.
   @override
-  void prepare(List<String> texts, {int startFrom = 0, int concurrency = 3}) {
-    _batchTotal = texts.length;
-    _batchDone = texts.where((t) => _cache.contains(_cacheKey(t))).length;
-    onPrepareProgress?.call();
-    if (_batchDone >= _batchTotal) return;
-
+  void prepare(List<String> texts, {int startFrom = 0}) {
+    _prepareGeneration++;
     final start = startFrom.clamp(0, texts.length);
-    final pending = [...texts.sublist(start), ...texts.sublist(0, start)]
-        .where((t) => !_cache.contains(_cacheKey(t)))
-        .toList();
+    // A set: a sentence that comes up twice is synthesised and counted once.
+    final window = texts
+        .sublist(start, (start + _prepareWindow).clamp(0, texts.length))
+        .where((t) => t.isNotEmpty)
+        .toSet();
+    // get() also marks the ones already here as recently used, so the new
+    // ones push out audio from elsewhere rather than these.
+    _prepareQueue
+      ..clear()
+      ..addAll(window.where((t) => _cache.get(_cacheKey(t)) == null));
+    _batchTotal = window.length;
+    _batchDone = window.length - _prepareQueue.length;
+    onPrepareProgress?.call();
+    _pumpPrepare();
+  }
 
-    var running = 0;
-    var nextIndex = 0;
-    void startNext() {
-      while (running < concurrency && nextIndex < pending.length) {
-        running++;
+  void _pumpPrepare() {
+    final gen = _prepareGeneration;
+    while (_prepareRunning < _prepareConcurrency && _prepareQueue.isNotEmpty) {
+      _prepareRunning++;
+      _getAudio(_prepareQueue.removeFirst())
+          .then((_) {}, onError: (_) {})
+          .whenComplete(() {
+        _prepareRunning--;
         // Failures count as done so the progress indicator still completes.
-        _getAudio(pending[nextIndex++]).then((_) {}, onError: (_) {}).whenComplete(() {
+        // Work started for a batch that has been replaced isn't counted.
+        if (gen == _prepareGeneration) {
           _batchDone++;
-          running--;
           onPrepareProgress?.call();
-          startNext();
-        });
-      }
-    }
-
-    startNext();
-  }
-
-  @override
-  Future<void> speak(String text) async {
-    if (text.isEmpty) return;
-    final gen = ++_speakGeneration;
-
-    // Stop first so replacing the source doesn't fire a 'completed' event.
-    _playing = false;
-    await _player.stop();
-
-    try {
-      final audioBytes = await _getAudio(text);
-      if (gen != _speakGeneration) return;
-
-      if (audioBytes.isEmpty) {
-        onComplete?.call();
-        return;
-      }
-
-      await _player.setAudioSource(BytesAudioSource(audioBytes, 'audio/mpeg'));
-      if (gen != _speakGeneration) return;
-      _playing = true;
-      // play()'s future only completes when playback ends, so don't await it —
-      // the bytes are in memory and audio starts right away.
-      _player.play().ignore();
-      onStart?.call();
-    } catch (e) {
-      if (gen != _speakGeneration) return;
-      _playing = false;
-      onError?.call(e.toString());
+        }
+        _pumpPrepare();
+      });
     }
   }
 
   @override
-  Future<void> stop() async {
-    _speakGeneration++;
-    _playing = false;
-    await _player.stop();
-  }
-
-  @override
-  Future<void> pause() async {
-    _playing = false;
-    await _player.pause();
-  }
-
-  @override
-  Future<void> resume() async {
-    _playing = true;
-    _player.play().ignore();
-  }
+  Future<Uint8List?> audioFor(String text, bool Function() isCurrent) =>
+      _getAudio(text);
 
   @override
   void clearCache() {
+    _prepareGeneration++;
+    _prepareQueue.clear();
     _cache.clear();
     _pendingSynths.clear();
     _batchTotal = 0;

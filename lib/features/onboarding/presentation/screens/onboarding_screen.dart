@@ -5,10 +5,12 @@ import 'package:go_router/go_router.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
+import 'package:velum/features/settings/presentation/widgets/reader_controls.dart';
 import 'package:velum/features/library/presentation/providers/library_notifier.dart';
+import 'package:velum/features/library/presentation/widgets/storage_access.dart';
 import 'package:velum/core/theme/app_colors.dart';
+import 'package:velum/core/motion/motion.dart';
 
-// App accent green matching the icon
 const Color _accent = AppColors.accent;
 
 class OnboardingScreen extends StatefulWidget {
@@ -29,28 +31,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   }
 
   void _nextPage() {
-    // Validate Library Setup step (Page 1 -> 2)
-    if (_currentPage == 1) {
-      final libraryNotifier = context.read<LibraryNotifier>();
-      final hasSelectedOption =
-          libraryNotifier.isAutoScanEnabled || libraryNotifier.books.isNotEmpty;
-
-      if (!hasSelectedOption) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please select an option to build your library'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        return;
-      }
-    }
-
     if (_currentPage < _pages.length - 1) {
-      _pageController.nextPage(
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeInOut,
-      );
+      _pageController.nextPage(duration: Motion.slow, curve: Motion.smoothOut);
     }
   }
 
@@ -98,7 +80,8 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(_pages.length, (index) {
                   return AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
+                    duration: Motion.fast,
+                    curve: Motion.smoothOut,
                     margin: const EdgeInsets.symmetric(horizontal: 4),
                     width: _currentPage == index ? 24 : 8,
                     height: 8,
@@ -139,58 +122,78 @@ class _WelcomePage extends StatelessWidget {
         children: [
           const Spacer(),
           // App Icon
-          ClipRRect(
-            borderRadius: BorderRadius.circular(30),
-            child: Image.asset(
-              'assets/app_icon.png',
-              width: 120,
-              height: 120,
+          RevealIn(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(30),
+              child: Image.asset(
+                'assets/app_icon.png',
+                width: 120,
+                height: 120,
+              ),
             ),
           ),
           const SizedBox(height: 40),
           // App name
-          Text(
-            'Velum',
-            style: TextStyle(
-              fontSize: 42,
-              fontWeight: FontWeight.bold,
-              color: appTheme.textColor,
-              letterSpacing: 2,
+          RevealIn(
+            index: 1,
+            child: Text(
+              'Velum',
+              style: TextStyle(
+                fontSize: 42,
+                fontWeight: FontWeight.bold,
+                color: appTheme.textColor,
+                letterSpacing: 2,
+              ),
             ),
           ),
           const SizedBox(height: 16),
           // Tagline
-          Text(
-            'Your Beautiful EPUB Reader',
-            style: TextStyle(
-              fontSize: 18,
-              color: appTheme.textColor.withAlpha(180),
+          RevealIn(
+            index: 2,
+            child: Text(
+              'Your Beautiful EPUB Reader',
+              style: TextStyle(
+                fontSize: 18,
+                color: appTheme.textColor.withAlpha(180),
+              ),
             ),
           ),
           const SizedBox(height: 48),
           // Features
-          _FeatureItem(
-            icon: Icons.library_add,
-            text: 'Add EPUB books from your device',
-            theme: appTheme,
+          RevealIn(
+            index: 3,
+            child: _FeatureItem(
+              icon: Icons.library_add,
+              text: 'Add EPUB books from your device',
+              theme: appTheme,
+            ),
           ),
           const SizedBox(height: 16),
-          _FeatureItem(
-            icon: Icons.palette,
-            text: 'Customizable themes for reading',
-            theme: appTheme,
+          RevealIn(
+            index: 4,
+            child: _FeatureItem(
+              icon: Icons.palette,
+              text: 'Customizable themes for reading',
+              theme: appTheme,
+            ),
           ),
           const SizedBox(height: 16),
-          _FeatureItem(
-            icon: Icons.text_fields,
-            text: 'Adjust fonts, sizes, and spacing',
-            theme: appTheme,
+          RevealIn(
+            index: 5,
+            child: _FeatureItem(
+              icon: Icons.text_fields,
+              text: 'Adjust fonts, sizes, and spacing',
+              theme: appTheme,
+            ),
           ),
           const SizedBox(height: 16),
-          _FeatureItem(
-            icon: Icons.record_voice_over,
-            text: 'Listen to books with Text-to-Speech',
-            theme: appTheme,
+          RevealIn(
+            index: 6,
+            child: _FeatureItem(
+              icon: Icons.record_voice_over,
+              text: 'Listen to books with Text-to-Speech',
+              theme: appTheme,
+            ),
           ),
           const Spacer(),
           // Next button
@@ -274,20 +277,7 @@ class _LibrarySetupPage extends StatefulWidget {
 class _LibrarySetupPageState extends State<_LibrarySetupPage> {
   Future<void> _startAutoDetect() async {
     final notifier = context.read<LibraryNotifier>();
-
-    // Request permission
-    final granted = await notifier.requestStoragePermission();
-    if (!granted) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Storage permission is required to scan for books'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      }
-      return;
-    }
+    if (!await requestStorageAccess(context)) return;
 
     // Enable auto-scan and start scanning
     await notifier.setAutoScanEnabled(true);
@@ -307,7 +297,6 @@ class _LibrarySetupPageState extends State<_LibrarySetupPage> {
       child: Column(
         children: [
           const Spacer(),
-          // ... (rest of the UI remains the same until the button)
           // Icon
           Container(
             width: 100,
@@ -409,7 +398,7 @@ class _LibrarySetupPageState extends State<_LibrarySetupPage> {
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      '${libraryNotifier.books.length} book${libraryNotifier.books.length == 1 ? '' : 's'} in your library',
+                      '${booksLabel(libraryNotifier.books.length)} in your library',
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
@@ -446,14 +435,13 @@ class _LibrarySetupPageState extends State<_LibrarySetupPage> {
 
           const Spacer(),
 
-          // Continue button
+          // Continue button (adding books now is optional: the storage
+          // permission may have been refused, or there are no EPUBs yet)
           SizedBox(
             width: double.infinity,
             height: 56,
             child: ElevatedButton(
-              onPressed: (libraryNotifier.isScanning || !hasSelectedOption)
-                  ? null
-                  : widget.onNext,
+              onPressed: libraryNotifier.isScanning ? null : widget.onNext,
               style: ElevatedButton.styleFrom(
                 backgroundColor: _accent,
                 foregroundColor: Colors.white,
@@ -464,9 +452,12 @@ class _LibrarySetupPageState extends State<_LibrarySetupPage> {
                 ),
                 elevation: 0,
               ),
-              child: const Text(
-                'Continue',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+              child: Text(
+                hasSelectedOption ? 'Continue' : 'Skip for Now',
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
             ),
           ),
@@ -598,12 +589,46 @@ class _NotificationSetupPageState extends State<_NotificationSetupPage> {
   bool _granted = false;
   bool _requested = false;
 
-  Future<void> _requestPermission() async {
-    final status = await Permission.notification.request();
+  /// Refused for good: Android no longer shows its prompt, so the only way
+  /// left to allow notifications is the app's settings page.
+  bool _permanentlyDenied = false;
+
+  late final AppLifecycleListener _lifecycle;
+
+  @override
+  void initState() {
+    super.initState();
+    _readStatus();
+    // Read it again when the user comes back from that page.
+    _lifecycle = AppLifecycleListener(onResume: _readStatus);
+  }
+
+  @override
+  void dispose() {
+    _lifecycle.dispose();
+    super.dispose();
+  }
+
+  void _show(PermissionStatus status) {
+    if (!mounted) return;
     setState(() {
       _granted = status.isGranted;
-      _requested = true;
+      _permanentlyDenied = status.isPermanentlyDenied;
     });
+  }
+
+  Future<void> _readStatus() async {
+    _show(await Permission.notification.status);
+  }
+
+  Future<void> _requestPermission() async {
+    if (_permanentlyDenied) {
+      await openAppSettings();
+      return;
+    }
+    final status = await Permission.notification.request();
+    _requested = true;
+    _show(status);
   }
 
   @override
@@ -623,11 +648,7 @@ class _NotificationSetupPageState extends State<_NotificationSetupPage> {
               color: _accent.withAlpha(30),
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              Icons.notifications_active,
-              size: 50,
-              color: _accent,
-            ),
+            child: Icon(Icons.notifications_active, size: 50, color: _accent),
           ),
           const SizedBox(height: 32),
           Text(
@@ -705,7 +726,11 @@ class _NotificationSetupPageState extends State<_NotificationSetupPage> {
                 onPressed: _requestPermission,
                 icon: const Icon(Icons.notifications, size: 20),
                 label: Text(
-                  _requested ? 'Try Again' : 'Allow Notifications',
+                  _permanentlyDenied
+                      ? 'Open Settings'
+                      : _requested
+                      ? 'Try Again'
+                      : 'Allow Notifications',
                   style: const TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
@@ -884,65 +909,11 @@ class _ThemeSection extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: ReaderTheme.values.map((theme) {
-            final isSelected = selectedTheme == theme;
-            return GestureDetector(
-              onTap: () => onSelect(theme),
-              child: Column(
-                children: [
-                  AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 56,
-                    height: 56,
-                    decoration: BoxDecoration(
-                      color: theme.backgroundColor,
-                      shape: BoxShape.circle,
-                      border: Border.all(
-                        color: isSelected
-                            ? _accent
-                            : Colors.grey.withAlpha(60),
-                        width: isSelected ? 3 : 1,
-                      ),
-                      boxShadow: isSelected
-                          ? [
-                              BoxShadow(
-                                color: _accent.withAlpha(60),
-                                blurRadius: 12,
-                                spreadRadius: 2,
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Center(
-                      child: Text(
-                        'Aa',
-                        style: TextStyle(
-                          color: theme.textColor,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    theme.displayName,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: displayTheme.textColor.withAlpha(
-                        isSelected ? 255 : 150,
-                      ),
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
+        ThemeCircles(
+          selected: selectedTheme,
+          onSelect: onSelect,
+          labelColor: displayTheme.textColor,
+          labelSize: 12,
         ),
       ],
     );

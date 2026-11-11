@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -63,11 +64,19 @@ class PhononModel extends ChangeNotifier {
   /// Download progress, 0 to 1.
   double get progress => _progress;
 
-  /// Why the last download failed, until the next one starts.
+  /// Why the last download (or removing it) failed, until the next one
+  /// starts.
   String? get error => _error;
 
   /// The checkpoint folder the library loads. Null until [init].
   String? get path => _dir?.path;
+
+  Directory get _staging => Directory('${_dir!.path}.partial');
+
+  // A connection that stalls would otherwise leave the download at the same
+  // percentage for good.
+  static const _connectTimeout = Duration(seconds: 20);
+  static const _stallTimeout = Duration(seconds: 30);
 
   Future<void> init() async {
     final support = await getApplicationSupportDirectory();
@@ -75,11 +84,36 @@ class PhononModel extends ChangeNotifier {
     if (!phononSupported()) {
       _status = PhononModelStatus.unsupported;
     } else if (_status != PhononModelStatus.downloading) {
-      _status = await _dir!.exists()
+      _status = await _isComplete(_dir!)
           ? PhononModelStatus.installed
           : PhononModelStatus.notInstalled;
+      // A folder the model can't load from is only wasted space, and so is
+      // a download the app was closed in the middle of.
+      if (!isInstalled) await _remove(_dir!);
+      await _remove(_staging);
     }
     notifyListeners();
+  }
+
+  /// Whether [dir] holds every model file at its full size. A folder alone
+  /// doesn't count: a file can be missing or cut short.
+  Future<bool> _isComplete(Directory dir) async {
+    for (final MapEntry(key: name, value: size) in _modelFiles.entries) {
+      final file = File(p.join(dir.path, name));
+      if (!await file.exists() || await file.length() != size) return false;
+    }
+    return true;
+  }
+
+  /// Delete [dir] if it's there. Returns false if that failed.
+  Future<bool> _remove(Directory dir) async {
+    try {
+      if (await dir.exists()) await dir.delete(recursive: true);
+      return true;
+    } catch (e) {
+      debugPrint('Could not delete ${dir.path}: $e');
+      return false;
+    }
   }
 
   /// The voices that came with the model.
@@ -102,8 +136,8 @@ class PhononModel extends ChangeNotifier {
     _cancelled = false;
     notifyListeners();
 
-    final staging = Directory('${_dir!.path}.partial');
-    final client = _client = HttpClient();
+    final staging = _staging;
+    final client = _client = HttpClient()..connectionTimeout = _connectTimeout;
     try {
       if (await staging.exists()) await staging.delete(recursive: true);
       await Directory(p.join(staging.path, 'voices')).create(recursive: true);
@@ -127,17 +161,17 @@ class PhononModel extends ChangeNotifier {
       }
 
       final downloads = [
-        for (final f in _modelFiles.keys) ('$_modelUrl/$f', f),
+        for (final MapEntry(key: f, value: size) in _modelFiles.entries)
+          ('$_modelUrl/$f', f, size),
         // The library names each voice after its file.
         for (final (info, file) in voices)
-          ('$_voicesUrl/$file', 'voices/${info.name}.safetensors'),
+          ('$_voicesUrl/$file', 'voices/${info.name}.safetensors', _voiceFileSize),
       ];
-      final total = _modelFiles.values.fold(0, (a, b) => a + b) +
-          voices.length * _voiceFileSize;
+      final total = downloads.fold(0, (sum, d) => sum + d.$3);
       var done = 0;
-      for (final (url, name) in downloads) {
-        done += await _fetchFile(client, url, File(p.join(staging.path, name)),
-            (received) {
+      for (final (url, name, size) in downloads) {
+        done += await _fetchFile(
+            client, url, File(p.join(staging.path, name)), size, (received) {
           final progress = ((done + received) / total).clamp(0.0, 1.0);
           // Every 0.5%, rather than for each network chunk.
           if (progress - _progress < 0.005) return;
@@ -155,15 +189,28 @@ class PhononModel extends ChangeNotifier {
     } catch (e) {
       debugPrint('Phonon download failed: $e');
       _status = PhononModelStatus.notInstalled;
-      if (!_cancelled) _error = 'Download failed. Check your connection and try again.';
-      try {
-        if (await staging.exists()) await staging.delete(recursive: true);
-      } catch (_) {}
+      if (!_cancelled) _error = _describeFailure(e);
+      await _remove(staging);
     } finally {
       client.close(force: true);
       _client = null;
       notifyListeners();
     }
+  }
+
+  static String _describeFailure(Object e) {
+    if (e is FileSystemException) {
+      // 28 is "no space left on device" on Android and on a Mac.
+      return e.osError?.errorCode == 28
+          ? 'Download failed. There isn\'t enough free space for it '
+              '(about $approximateMegabytes MB).'
+          : 'Download failed. The files couldn\'t be saved on this device.';
+    }
+    // FormatException: a sign-in page or the like came in place of a file.
+    if (e is IOException || e is TimeoutException || e is FormatException) {
+      return 'Download failed. Check your connection and try again.';
+    }
+    return 'Download failed. Try again later.';
   }
 
   void cancelDownload() {
@@ -174,38 +221,49 @@ class PhononModel extends ChangeNotifier {
   /// Remove the downloaded files. Unload the voice first.
   Future<void> delete() async {
     if (_status != PhononModelStatus.installed) return;
-    try {
-      await _dir!.delete(recursive: true);
-    } catch (e) {
-      debugPrint('Could not delete the Phonon model: $e');
+    _error = null;
+    if (!await _remove(_dir!)) {
+      // Still installed unless some of it did go.
+      _error = 'Couldn\'t remove the Phonon voices.';
+      if (await _isComplete(_dir!)) {
+        notifyListeners();
+        return;
+      }
     }
     _status = PhononModelStatus.notInstalled;
     notifyListeners();
   }
 
-  Future<String> _fetchString(HttpClient client, String url) async {
-    final response = await (await client.getUrl(Uri.parse(url))).close();
+  Future<HttpClientResponse> _get(HttpClient client, String url) async {
+    final uri = Uri.parse(url);
+    final request = await client.getUrl(uri);
+    final response = await request.close().timeout(_stallTimeout);
     if (response.statusCode != HttpStatus.ok) {
-      throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(url));
+      throw HttpException('HTTP ${response.statusCode}', uri: uri);
     }
-    return response.transform(utf8.decoder).join();
+    return response;
   }
 
-  /// Download [url] to [file], returning its size.
+  Future<String> _fetchString(HttpClient client, String url) async {
+    final response = await _get(client, url);
+    return response.timeout(_stallTimeout).transform(utf8.decoder).join();
+  }
+
+  /// Download [url] to [file], returning its size. Fails unless that is
+  /// [expectedSize]: a download cut short, or an error page sent in place of
+  /// the file, would otherwise be installed and never load.
   Future<int> _fetchFile(
     HttpClient client,
     String url,
     File file,
+    int expectedSize,
     void Function(int received) onProgress,
   ) async {
-    final response = await (await client.getUrl(Uri.parse(url))).close();
-    if (response.statusCode != HttpStatus.ok) {
-      throw HttpException('HTTP ${response.statusCode}', uri: Uri.parse(url));
-    }
+    final response = await _get(client, url);
     final sink = file.openWrite();
     var received = 0;
     try {
-      await for (final chunk in response) {
+      await for (final chunk in response.timeout(_stallTimeout)) {
         sink.add(chunk);
         received += chunk.length;
         onProgress(received);
@@ -213,8 +271,11 @@ class PhononModel extends ChangeNotifier {
     } finally {
       await sink.close();
     }
-    if (response.contentLength >= 0 && received != response.contentLength) {
-      throw HttpException('incomplete download', uri: Uri.parse(url));
+    if (received != expectedSize) {
+      throw HttpException(
+        'got $received bytes, expected $expectedSize',
+        uri: Uri.parse(url),
+      );
     }
     return received;
   }

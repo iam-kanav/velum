@@ -12,12 +12,6 @@ class VelumAudioHandler extends BaseAudioHandler {
     _syncPlaybackState();
   }
 
-  /// Detach when disposing.
-  void detachNotifier() {
-    _ttsNotifier?.removeListener(_syncPlaybackState);
-    _ttsNotifier = null;
-  }
-
   String? _bookTitle;
   String? _chapterTitle;
 
@@ -117,7 +111,7 @@ class VelumAudioHandler extends BaseAudioHandler {
     );
 
     if (hasNext) {
-      await notifier.jumpToParagraph(nextParagraphIndex);
+      await notifier.jumpTo(nextParagraphIndex);
     }
   }
 
@@ -131,10 +125,6 @@ class VelumAudioHandler extends BaseAudioHandler {
 
     final prevParagraphIndex = currentChunk.paragraphIndex - 1;
 
-    if (prevParagraphIndex >= 0) {
-      await notifier.jumpToParagraph(prevParagraphIndex);
-    } else {
-      await notifier.jumpToParagraph(0);
-    }
+    await notifier.jumpTo(prevParagraphIndex >= 0 ? prevParagraphIndex : 0);
   }
 }

@@ -1,14 +1,15 @@
 import 'dart:io';
 import 'package:epubx/epubx.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 import 'package:html/dom.dart' as dom;
 import 'package:html/parser.dart' as html_parser;
+
+import 'chapter_processor.dart';
 
 /// A parsed book: chapter text is loaded up front, images are read from the
 /// archive only when a chapter needs them.
 class OpenedBook {
-  /// Title, author and chapters (with HTML). Content/images are not loaded.
+  /// Title and chapters (with HTML). Content/images are not loaded.
   final EpubBook book;
   final List<String> imageNames;
   final List<int>? Function(String imageName) readImage;
@@ -19,17 +20,12 @@ class OpenedBook {
 class EpubService {
   const EpubService();
 
-  /// Open an EPUB from the asset bundle (path starts with 'assets/') or a file.
+  /// Open the EPUB file at [path].
   Future<OpenedBook> parseEpub(String path) async {
-    final Uint8List bytes;
     try {
-      if (path.startsWith('assets/')) {
-        bytes = (await rootBundle.load(path)).buffer.asUint8List();
-      } else {
-        final file = File(path);
-        if (!await file.exists()) throw Exception('File not found: $path');
-        bytes = await file.readAsBytes();
-      }
+      final file = File(path);
+      if (!await file.exists()) throw Exception('File not found: $path');
+      final bytes = await file.readAsBytes();
 
       // Chapter HTML is read in a background isolate while the archive index
       // (cheap: no decompression) is opened here for on-demand image reads.
@@ -54,11 +50,18 @@ class EpubService {
   }
 }
 
-/// Top-level so it can run in an isolate: title, author and chapter HTML only.
+/// Top-level so it can run in an isolate: title and chapter HTML only.
 Future<EpubBook> _readChaptersIsolate(Uint8List bytes) async {
   final bookRef = await EpubReader.openBook(bytes);
+
+  // Each file is read once, however many contents entries point into it
+  // and whether or not it is also in the reading order.
+  final texts = <String?, String>{};
+  Future<String> read(String? file, Future<String> Function() load) async =>
+      texts[file] ??= await load();
+
   final chapters = flattenChapters(
-    await EpubReader.readChapters(await bookRef.getChapters()),
+    await _readChapters(await bookRef.getChapters(), read),
   );
 
   // The reading order (spine) as HTML file names, with each file's HTML.
@@ -80,17 +83,55 @@ Future<EpubBook> _readChaptersIsolate(Uint8List bytes) async {
     final ref = htmlRefs[name];
     if (ref == null || html.containsKey(name)) continue;
     try {
-      html[name] = await ref.readContentAsText();
+      html[name] = await read(ref.FileName, ref.readContentAsText);
       spine.add(name);
     } catch (_) {}
   }
 
   return EpubBook()
     ..Title = bookRef.Title
-    ..Author = bookRef.Author
-    ..AuthorList = bookRef.AuthorList
-    ..Chapters = followReadingOrder(chapters, spine, html);
+    ..Chapters = chapters.isEmpty
+        ? chaptersFromSpine(spine, html)
+        : followReadingOrder(chapters, spine, html);
 }
+
+/// The contents entries [refs] as chapters with their HTML, like epubx's
+/// `EpubReader.readChapters` but reading each file through [read].
+Future<List<EpubChapter>> _readChapters(
+  List<EpubChapterRef> refs,
+  Future<String> Function(String? file, Future<String> Function() load) read,
+) async {
+  final chapters = <EpubChapter>[];
+  for (final ref in refs) {
+    chapters.add(
+      EpubChapter()
+        ..Title = ref.Title
+        ..ContentFileName = ref.ContentFileName
+        ..Anchor = ref.Anchor
+        ..HtmlContent = await read(
+          ref.epubTextContentFileRef!.FileName,
+          ref.readHtmlContent,
+        )
+        ..SubChapters = await _readChapters(ref.SubChapters ?? const [], read),
+    );
+  }
+  return chapters;
+}
+
+/// A book with no table of contents is read file by file, in its reading
+/// order ([spine], with each file's HTML in [html]).
+@visibleForTesting
+List<EpubChapter> chaptersFromSpine(
+  List<String> spine,
+  Map<String, String> html,
+) => [
+  for (var i = 0; i < spine.length; i++)
+    EpubChapter()
+      ..Title = 'Chapter ${i + 1}'
+      ..ContentFileName = spine[i]
+      ..HtmlContent = html[spine[i]]
+      ..SubChapters = [],
+];
 
 String _decode(String path) {
   try {
@@ -127,15 +168,24 @@ List<EpubChapter> followReadingOrder(
   final bodies = <int, dom.Element?>{};
   dom.Element? body(int file) => bodies.putIfAbsent(
     file,
-    () => html_parser.parse(html[spine[file]] ?? '').body,
+    () => html_parser
+        .parse(ChapterProcessor.expandSelfClosing(html[spine[file]] ?? ''))
+        .body,
   );
   final elementOrders = <int, Map<String, int>>{};
   int elementOrder(int file, String id) {
     final ids = elementOrders.putIfAbsent(file, () {
-      final elements = body(file)?.querySelectorAll('[id]') ?? const [];
       final all = body(file)?.querySelectorAll('*') ?? const [];
-      final order = {for (var i = 0; i < all.length; i++) all[i]: i};
-      return {for (final e in elements) e.id: order[e]!};
+      final order = <String, int>{};
+      for (var i = 0; i < all.length; i++) {
+        if (all[i].id.isNotEmpty) order[all[i].id] = i;
+      }
+      // Older books mark places with <a name="x"> instead of an id.
+      for (var i = 0; i < all.length; i++) {
+        final name = all[i].localName == 'a' ? all[i].attributes['name'] : null;
+        if (name != null && name.isNotEmpty) order.putIfAbsent(name, () => i);
+      }
+      return order;
     });
     return ids[id] ?? -1;
   }

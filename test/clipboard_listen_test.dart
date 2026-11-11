@@ -24,4 +24,10 @@ void main() {
     expect(note.title, 'The quick brown fox jumps over the lazy dog and keeps on…');
     expect(note.title.length, lessThanOrEqualTo(61));
   });
+
+  test('a title is never cut through the middle of an emoji', () {
+    // The 60th and 61st code units are one emoji.
+    final note = ClipboardListen.noteFromText('${'a' * 59}😀${'b' * 20}');
+    expect(note.title, '${'a' * 59}😀…');
+  });
 }

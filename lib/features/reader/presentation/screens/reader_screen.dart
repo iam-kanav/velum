@@ -7,7 +7,6 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../providers/reader_notifier.dart';
-import '../../data/services/chapter_processor.dart';
 import 'package:velum/features/library/data/services/library_service.dart';
 import '../widgets/reader_tutorial_overlay.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
@@ -31,13 +30,14 @@ import 'package:velum/features/reader/presentation/widgets/global_search_overlay
 import 'package:velum/features/reader/presentation/widgets/book_complete_overlay.dart';
 import 'package:velum/features/reader/presentation/widgets/tts_fab.dart';
 import 'package:velum/core/theme/app_colors.dart';
+import 'package:velum/core/storage/book_data.dart';
 import 'package:velum/features/notes/data/note_service.dart';
+import 'package:velum/core/motion/motion.dart';
 
 const Color _accent = AppColors.accent;
 
 /// Reader bottom bar (progress line + controls row).
 const double _barHeight = 96;
-
 
 class ReaderScreen extends StatefulWidget {
   final String assetPath;
@@ -71,9 +71,6 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // Global search
   bool _showSearch = false;
-  final TextEditingController _searchController = TextEditingController();
-  final FocusNode _searchFocusNode = FocusNode();
-  Timer? _searchDebounce;
   double? _pendingScrollPercent;
 
   // Page turn animation
@@ -144,15 +141,13 @@ class _ReaderScreenState extends State<ReaderScreen>
       // Load bookmarks for this book
       _bookmarkNotifier = context.read<BookmarkNotifier>();
       _bookmarkNotifier!.loadBookmarks(widget.assetPath);
-
     });
   }
 
   @override
   void dispose() {
     // Save reading position when exiting
-    _readerNotifier?.saveReadingPosition(_savedScrollPosition);
-    if (_shownChapter != null) _rememberChapter(_shownChapterIndex);
+    _savePosition();
 
     WidgetsBinding.instance.removeObserver(this);
     _readerNotifier?.removeListener(_onReaderChanged);
@@ -162,10 +157,14 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (_ttsNotifier?.onBookFinished == _onBookFinished) {
       _ttsNotifier!.onBookFinished = null;
     }
+    // Read-aloud was waiting for the new page to say where to carry on, and
+    // no answer is coming now: start from the remembered sentence rather
+    // than stay "playing" in silence.
+    if (_continuePending) {
+      _isPageReady = false; // no page left to highlight on
+      _continueReading(_rememberedStart);
+    }
     _continueFallback?.cancel();
-    _searchDebounce?.cancel();
-    _searchController.dispose();
-    _searchFocusNode.dispose();
     _pageAnimController.dispose();
     super.dispose();
   }
@@ -176,15 +175,17 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Where the reader was in each chapter of this book: scroll offset and
   /// the last read-aloud sentence, so returning to a chapter (swipe, contents)
   /// picks up exactly there. Persisted per book.
-  final Map<int, ({double scroll, int? para, int? sent})> _chapterPositions = {};
+  final Map<int, ({double scroll, int? para, int? sent})> _chapterPositions =
+      {};
   double? _pendingBookmarkScroll;
   late final SharedPreferences _prefs;
 
-  String get _chapterPositionsKey =>
-      'chapter_positions_${widget.assetPath.hashCode}';
-
   void _loadChapterPositions() {
-    final raw = _prefs.getString(_chapterPositionsKey);
+    final raw = BookData.read(
+      _prefs,
+      BookData.chapterPositions,
+      widget.assetPath,
+    );
     if (raw == null) return;
     try {
       (jsonDecode(raw) as Map<String, dynamic>).forEach((k, v) {
@@ -199,8 +200,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _saveChapterPositions() {
-    _prefs.setString(
-      _chapterPositionsKey,
+    BookData.write(
+      _prefs,
+      BookData.chapterPositions,
+      widget.assetPath,
       jsonEncode({
         for (final e in _chapterPositions.entries)
           '${e.key}': [e.value.scroll, e.value.para, e.value.sent],
@@ -212,8 +215,12 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _rememberChapter(int index) {
     final tts = _ttsNotifier;
     final chunk = tts?.currentChunk;
-    final hasTts = tts != null &&
+    // While read-aloud waits to carry on in a new chapter it has no place
+    // in it yet.
+    final hasTts =
+        tts != null &&
         _ownsTts &&
+        !_continuePending &&
         tts.chapterIndex == index &&
         tts.chunks.isNotEmpty &&
         tts.state != TtsState.idle;
@@ -225,6 +232,35 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
     _saveChapterPositions();
   }
+
+  /// The sentence the chapter on screen was left on, as "para:sent" ("" if
+  /// read-aloud hasn't been there).
+  String get _rememberedStart {
+    final remembered = _chapterPositions[_shownChapterIndex];
+    return remembered?.para == null
+        ? ''
+        : '${remembered!.para}:${remembered.sent ?? ''}';
+  }
+
+  /// Where a chapter being turned to opens: a bookmark's spot, else where
+  /// the reader left it, else the top. Search/highlight jumps scroll on
+  /// their own.
+  double _openingScroll(int index) =>
+      _pendingBookmarkScroll ??
+      (_pendingScrollPercent == null && _pendingScrollHighlightId == null
+          ? _chapterPositions[index]?.scroll
+          : null) ??
+      0;
+
+  /// Save where the reader is: this chapter's spot, and the book's position
+  /// in the library. Nothing is saved until the first chapter is on the
+  /// page: before that the position isn't known, and saving would reset it.
+  void _savePosition() {
+    if (_shownChapter == null || _isInitialLoad) return;
+    _rememberChapter(_shownChapterIndex);
+    _readerNotifier?.saveReadingPosition(_savedScrollPosition);
+  }
+
   bool? _lastShowUI;
 
   /// When the bars hide, the Play button slides down onto where the settings
@@ -258,7 +294,12 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
 
     final firstShow = _shownChapter == null;
-    if (!firstShow) _rememberChapter(_shownChapterIndex);
+    if (!firstShow) {
+      _rememberChapter(_shownChapterIndex);
+      // The book reopens at this chapter even if the app is quit without
+      // warning before the next save.
+      _readerNotifier!.saveReadingPosition(_openingScroll(index));
+    }
     _shownChapter = chapter;
     _shownChapterIndex = index;
     // The old page stays up until the new one loads: don't highlight the
@@ -332,7 +373,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// This book as read-aloud sees it, so it can carry on into later
   /// chapters with the reader closed.
   ReadAloudBook _readAloudBook() {
-    final book = _readerNotifier!.currentBook;
+    final reader = _readerNotifier!;
+    final book = reader.currentBook;
     final chapters = [...?book?.Chapters];
     final library = context.read<LibraryService>();
     final path = widget.assetPath;
@@ -340,9 +382,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       path: path,
       title: book?.Title ?? 'Unknown Book',
       chapterTitles: [for (final c in chapters) c.Title ?? 'Unknown Chapter'],
-      // Same paragraphs as the page: inlining images doesn't change text.
-      paragraphsFor: (i) =>
-          ChapterProcessor.process(chapters[i].HtmlContent ?? '').$2,
+      // Same paragraphs as the page, which then shows the chapter without
+      // processing it again.
+      paragraphsFor: (i) => reader.paragraphsOf(chapters[i].HtmlContent ?? ''),
       onChapterStarted: (i) => library.updateReadingProgress(path, i, 0),
     );
   }
@@ -358,14 +400,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (_isPageReady) _askWhereToContinue();
     _continueFallback?.cancel();
     // If the page never reports, start from the remembered sentence.
-    _continueFallback = Timer(const Duration(seconds: 5), () {
-      final remembered = _chapterPositions[_shownChapterIndex];
-      _continueReading(
-        remembered?.para == null
-            ? ''
-            : '${remembered!.para}:${remembered.sent ?? ''}',
-      );
-    });
+    _continueFallback = Timer(
+      const Duration(seconds: 5),
+      () => _continueReading(_rememberedStart),
+    );
   }
 
   /// Ask the page where reading should carry on: the remembered sentence
@@ -375,7 +413,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final jumping =
         _pendingScrollHighlightId != null || _pendingScrollPercent != null;
     final remembered = _chapterPositions[_shownChapterIndex];
-    final top = (MediaQuery.of(context).padding.top + kToolbarHeight).round();
+    final top = _topBarHeight.round();
     _controller.runJavaScript(
       'window.ttsContinueFrom($top, ${remembered?.para ?? -1}, '
       '${remembered?.sent ?? -1}, ${jumping ? 400 : 100});',
@@ -428,38 +466,47 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
   }
 
-  bool _wasPaused = false;
-
+  /// Leaving the app in any way may be the last chance to save. On the Mac
+  /// it is never "paused": it loses focus, is hidden, or quits.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.paused) {
-      _wasPaused = true;
-      // Save scroll position for persistence
-      _controller.runJavaScript(
-        'ReaderChannel.postMessage("scroll:" + window.scrollY);',
+    if (state != AppLifecycleState.resumed) _saveOnLeaving();
+  }
+
+  /// Save the position as known now (the app may not live long enough for
+  /// the page to answer), then again with the page's exact scroll offset:
+  /// the last one it reported can be a moment old.
+  Future<void> _saveOnLeaving() async {
+    _savePosition();
+    final chapter = _shownChapter;
+    if (chapter == null || !_isPageReady) return;
+    try {
+      final result = await _controller.runJavaScriptReturningResult(
+        'window.scrollY',
       );
-      _readerNotifier?.saveReadingPosition(_savedScrollPosition);
-    } else if (state == AppLifecycleState.resumed && _wasPaused) {
-      _wasPaused = false;
-      // WebView preserves its own content and scroll position on warm resume.
-      // No reload needed — just let it stay where it was.
-    }
+      final scroll = result is num
+          ? result.toDouble()
+          : double.tryParse('$result');
+      if (!mounted ||
+          scroll == null ||
+          scroll == _savedScrollPosition ||
+          !_isPageReady ||
+          !identical(chapter, _shownChapter)) {
+        return;
+      }
+      _savedScrollPosition = scroll;
+      _savePosition();
+    } catch (_) {}
   }
 
   /// Check if the user has seen the reader tutorial before.
-  /// Uses provided SharedPreferences instead of re-fetching the singleton.
   void _checkTutorialFlag() {
-    final prefs = context.read<SharedPreferences>();
-    final hasSeen = prefs.getBool('has_seen_reader_tutorial') ?? false;
-    if (!hasSeen) {
-      setState(() => _showTutorial = true);
-    }
+    _showTutorial = !(_prefs.getBool('has_seen_reader_tutorial') ?? false);
   }
 
   /// Dismiss tutorial and persist the flag
   void _dismissTutorial() async {
-    final prefs = context.read<SharedPreferences>();
-    await prefs.setBool('has_seen_reader_tutorial', true);
+    await _prefs.setBool('has_seen_reader_tutorial', true);
     if (mounted) {
       setState(() => _showTutorial = false);
     }
@@ -467,44 +514,48 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // ── Search ──────────────────────────────────────────────────────────
 
-  void _openSearch() {
-    setState(() => _showSearch = true);
-    // Delay focus so the widget is built first
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _searchFocusNode.requestFocus();
-    });
-  }
+  void _openSearch() => setState(() => _showSearch = true);
 
-  void _closeSearch() {
-    _searchDebounce?.cancel();
-    _searchController.clear();
-    setState(() {
-      _showSearch = false;
-    });
-  }
+  void _closeSearch() => setState(() => _showSearch = false);
 
   void _onSearchResultTap(GlobalSearchResult result) {
+    _closeSearch();
+    _showChapter(
+      result.chapterIndex,
+      scrollNow: () {
+        final safePct = result.positionPercent.clamp(0.0, 1.0);
+        _controller.runJavaScript(
+          'window.scrollTo(0, document.body.scrollHeight * $safePct);',
+        );
+      },
+      scrollOnLoad: () => _pendingScrollPercent = result.positionPercent,
+    );
+  }
+
+  /// Go to a place in chapter [index] (search result, highlight, bookmark).
+  /// [scrollNow] runs if that chapter is already on screen; otherwise
+  /// [scrollOnLoad] notes what its page should do once loaded, and the
+  /// chapter is opened. A chapter that doesn't exist is ignored, with
+  /// nothing noted that a later chapter change could pick up.
+  void _showChapter(
+    int index, {
+    required VoidCallback scrollNow,
+    required VoidCallback scrollOnLoad,
+  }) {
     final notifier = context.read<ReaderNotifier>();
     final chapters = notifier.currentBook?.Chapters;
-    if (chapters == null) return;
-
-    _closeSearch();
-
-    final sameChapter = result.chapterIndex == notifier.currentChapterIndex;
-    if (sameChapter) {
-      // Scroll to position in current chapter
-      final safePct = result.positionPercent.clamp(0.0, 1.0);
-      _controller.runJavaScript(
-        'window.scrollTo(0, document.body.scrollHeight * $safePct);',
-      );
+    if (chapters == null || index < 0 || index >= chapters.length) return;
+    if (index == notifier.currentChapterIndex) {
+      scrollNow();
     } else {
-      // Jump to the target chapter, scroll after it loads
-      _pendingScrollPercent = result.positionPercent;
-      if (result.chapterIndex < chapters.length) {
-        notifier.jumpToChapter(chapters[result.chapterIndex]);
-      }
+      scrollOnLoad();
+      notifier.jumpToChapter(chapters[index]);
     }
   }
+
+  /// Height of the top bar, which lies over the page.
+  double get _topBarHeight =>
+      MediaQuery.of(context).padding.top + kToolbarHeight;
 
   /// Animate page turn - direction: -1 for next (left), 1 for prev (right)
   /// Full slide: old content slides out, new content slides in
@@ -544,6 +595,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       ..addJavaScriptChannel(
         'ReaderChannel',
         onMessageReceived: (JavaScriptMessage message) {
+          // The page can still be reporting after the reader has closed.
+          if (!mounted) return;
           final notifier = context.read<ReaderNotifier>();
           switch (message.message) {
             case 'toggle':
@@ -555,7 +608,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               HapticFeedback.mediumImpact();
               final chapterBefore = notifier.currentChapter;
               notifier.nextChapter();
-              if (notifier.currentChapter == chapterBefore) {
+              if (identical(notifier.currentChapter, chapterBefore)) {
                 // Already on the last chapter — show completion screen
                 setState(() => _showBookComplete = true);
               } else {
@@ -564,9 +617,12 @@ class _ReaderScreenState extends State<ReaderScreen>
               break;
             case 'prev':
               if (_isNote) break;
+              final chapterBefore = notifier.currentChapter;
+              notifier.previousChapter();
+              // Already on the first chapter: no page to turn.
+              if (identical(notifier.currentChapter, chapterBefore)) break;
               HapticFeedback.mediumImpact();
               _animatePageTurn(1); // Slide right
-              notifier.previousChapter();
               break;
             default:
               // Read-aloud follow mode toggled by the user scrolling away/back
@@ -576,8 +632,13 @@ class _ReaderScreenState extends State<ReaderScreen>
               }
               // Handle external URL opening
               else if (message.message.startsWith('open-url:')) {
-                final url = message.message.substring(9);
-                _openExternalUrl(url);
+                // Only web links: a book's page could ask for anything.
+                final uri = Uri.tryParse(message.message.substring(9));
+                if (uri != null &&
+                    (uri.isScheme('http') || uri.isScheme('https')) &&
+                    uri.host.isNotEmpty) {
+                  _openExternalUrl(uri.toString());
+                }
               }
               // Handle scroll position message
               else if (message.message.startsWith('scroll:')) {
@@ -663,9 +724,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             // Restore scroll position after page loads
             if (_shouldRestoreScroll && _savedScrollPosition > 0) {
               final safeScroll = _savedScrollPosition.toInt();
-              _controller.runJavaScript(
-                'window.scrollTo(0, $safeScroll);',
-              );
+              _controller.runJavaScript('window.scrollTo(0, $safeScroll);');
               _shouldRestoreScroll = false;
             }
             // Reading aloud carried on into this chapter: start where the
@@ -707,10 +766,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (paragraphs.isEmpty) return false;
     _lastTtsChapter = _shownChapterIndex;
     context.read<TtsNotifier>().loadChapter(
-          _readAloudBook(),
-          _shownChapterIndex,
-          paragraphs,
-        );
+      _readAloudBook(),
+      _shownChapterIndex,
+      paragraphs,
+    );
     return true;
   }
 
@@ -742,13 +801,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     final current = wasLoaded
         ? tts.currentChunk
         : (remembered?.para == null
-            ? null
-            : TtsChunk(
-                text: '',
-                paragraphIndex: remembered!.para!,
-                sentenceIndex: remembered.sent,
-              ));
-    final top = (MediaQuery.of(context).padding.top + kToolbarHeight).round();
+              ? null
+              : TtsChunk(
+                  text: '',
+                  paragraphIndex: remembered!.para!,
+                  sentenceIndex: remembered.sent,
+                ));
+    final top = _topBarHeight.round();
     String start = '';
     if (_isPageReady) {
       try {
@@ -808,7 +867,6 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     return Scaffold(
       backgroundColor: readerTheme.backgroundColor,
-      extendBodyBehindAppBar: true,
       // Wrap FAB in Consumer so only the FAB rebuilds on TTS state changes
       floatingActionButton: notifier.currentChapter != null && !_showSearch
           ? Consumer<TtsNotifier>(
@@ -817,14 +875,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                   ttsNotifier: ttsNotifier,
                   active: _ttsOnThisChapter,
                   onPressed: _onPlayPressed,
-                  // Sit right on top of the bar (or the ad area when the bar
-                  // is hidden). Scaffold already adds the system inset + 16.
-                  bottomMargin: showUI
-                      ? _barHeight - 16
-                      : 8,
+                  // Sit right on top of the bar (or near the bottom edge when
+                  // it is hidden). Scaffold already adds the system inset + 16.
+                  bottomMargin: showUI ? _barHeight - 16 : 8,
                   isOverlayOpen:
                       _showColorPicker || _showSearch || _showBookComplete,
-                  readerTheme: readerTheme,
                   spotlightKey: _fabKey,
                 );
               },
@@ -832,7 +887,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           : null,
       body: Stack(
         children: [
-          // Main content + ad layout
+          // Main content
           Column(
             children: [
               Expanded(
@@ -846,15 +901,12 @@ class _ReaderScreenState extends State<ReaderScreen>
 
                     // Layer 2: Top Bar (Animated) - Uses Reader Theme
                     AnimatedPositioned(
-                      duration: const Duration(milliseconds: 200),
-                      top: showUI
-                          ? 0
-                          : -kToolbarHeight -
-                                MediaQuery.of(context).padding.top,
+                      duration: Motion.fast,
+                      curve: Motion.smoothOut,
+                      top: showUI ? 0 : -_topBarHeight,
                       left: 0,
                       right: 0,
-                      height:
-                          kToolbarHeight + MediaQuery.of(context).padding.top,
+                      height: _topBarHeight,
                       child: AppBar(
                         backgroundColor: readerTheme.backgroundColor.withAlpha(
                           (0.95 * 255).round(),
@@ -897,16 +949,28 @@ class _ReaderScreenState extends State<ReaderScreen>
                             tooltip: 'Add Bookmark',
                             onPressed: () {
                               HapticFeedback.lightImpact();
-                              context.read<BookmarkNotifier>().addBookmark(
-                                chapterIndex: notifier.currentChapterIndex,
-                                scrollPosition: _savedScrollPosition,
-                                label: notifier.currentChapter?.Title,
+                              final bookmarks = context
+                                  .read<BookmarkNotifier>();
+                              final exists = bookmarks.hasBookmarkNear(
+                                notifier.currentChapterIndex,
+                                _savedScrollPosition,
                               );
+                              if (!exists) {
+                                bookmarks.addBookmark(
+                                  chapterIndex: notifier.currentChapterIndex,
+                                  scrollPosition: _savedScrollPosition,
+                                  label: notifier.currentChapter?.Title,
+                                );
+                              }
                               ScaffoldMessenger.of(context).clearSnackBars();
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Bookmark added'),
-                                  duration: Duration(seconds: 2),
+                                SnackBar(
+                                  content: Text(
+                                    exists
+                                        ? 'Already bookmarked here'
+                                        : 'Bookmark added',
+                                  ),
+                                  duration: const Duration(seconds: 2),
                                 ),
                               );
                             },
@@ -924,7 +988,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
                     // Layer 3: Bottom Bar (Animated) - Uses Reader Theme
                     AnimatedPositioned(
-                      duration: const Duration(milliseconds: 200),
+                      duration: Motion.fast,
+                      curve: Motion.smoothOut,
                       bottom: showUI ? 0 : -_barHeight,
                       left: 0,
                       right: 0,
@@ -941,18 +1006,25 @@ class _ReaderScreenState extends State<ReaderScreen>
                             if (notifier.currentBook?.Chapters != null &&
                                 notifier.currentBook!.Chapters!.isNotEmpty)
                               LinearProgressIndicator(
-                                value: (notifier.currentChapterIndex + 1) /
+                                value:
+                                    (notifier.currentChapterIndex + 1) /
                                     notifier.currentBook!.Chapters!.length,
                                 minHeight: 2,
-                                backgroundColor: readerTheme.textColor.withAlpha(20),
-                                valueColor: const AlwaysStoppedAnimation<Color>(_accent),
+                                backgroundColor: readerTheme.textColor
+                                    .withAlpha(20),
+                                valueColor: const AlwaysStoppedAnimation<Color>(
+                                  _accent,
+                                ),
                               ),
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 20,
+                              ),
                               child: SizedBox(
                                 height: _barHeight - 2,
                                 child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  mainAxisAlignment:
+                                      MainAxisAlignment.spaceBetween,
                                   children: [
                                     // Highlights/bookmarks icon
                                     IconButton(
@@ -963,27 +1035,38 @@ class _ReaderScreenState extends State<ReaderScreen>
                                         color: readerTheme.textColor,
                                       ),
                                       onPressed: () async {
-                                        final readerNotif = context.read<ReaderNotifier>();
-                                        final highlightNotif = context.read<HighlightNotifier>();
-                                        final bmNotif = context.read<BookmarkNotifier>();
+                                        final readerNotif = context
+                                            .read<ReaderNotifier>();
+                                        final highlightNotif = context
+                                            .read<HighlightNotifier>();
+                                        final bmNotif = context
+                                            .read<BookmarkNotifier>();
                                         final result =
                                             await showModalBottomSheet<dynamic>(
+                                              sheetAnimationStyle: Motion.sheet,
                                               context: context,
-                                              backgroundColor: Colors.transparent,
+                                              backgroundColor:
+                                                  Colors.transparent,
                                               builder: (_) => MultiProvider(
                                                 providers: [
-                                                  ChangeNotifierProvider.value(value: readerNotif),
-                                                  ChangeNotifierProvider.value(value: highlightNotif),
-                                                  ChangeNotifierProvider.value(value: bmNotif),
+                                                  ChangeNotifierProvider.value(
+                                                    value: readerNotif,
+                                                  ),
+                                                  ChangeNotifierProvider.value(
+                                                    value: highlightNotif,
+                                                  ),
+                                                  ChangeNotifierProvider.value(
+                                                    value: bmNotif,
+                                                  ),
                                                 ],
                                                 child: const HighlightsModal(),
                                               ),
                                             );
                                         if (result != null && mounted) {
                                           if (result is Highlight) {
-                                            _navigateToHighlight(result, notifier);
+                                            _navigateToHighlight(result);
                                           } else if (result is Bookmark) {
-                                            _navigateToBookmark(result, notifier);
+                                            _navigateToBookmark(result);
                                           }
                                         }
                                       },
@@ -993,21 +1076,29 @@ class _ReaderScreenState extends State<ReaderScreen>
                                       child: GestureDetector(
                                         key: _chapterNameKey,
                                         onTap: () {
-                                          final readerNotif = context.read<ReaderNotifier>();
+                                          final readerNotif = context
+                                              .read<ReaderNotifier>();
                                           showModalBottomSheet(
+                                            sheetAnimationStyle: Motion.sheet,
                                             context: context,
                                             backgroundColor: Colors.transparent,
-                                            builder: (_) => ChangeNotifierProvider.value(
-                                              value: readerNotif,
-                                              child: const ContentsModal(),
-                                            ),
+                                            // Lets the sheet rise above the
+                                            // keyboard for its search field.
+                                            isScrollControlled: true,
+                                            builder: (_) =>
+                                                ChangeNotifierProvider.value(
+                                                  value: readerNotif,
+                                                  child: const ContentsModal(),
+                                                ),
                                           );
                                         },
                                         child: Column(
-                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
                                           children: [
                                             Text(
-                                              notifier.currentChapter?.Title ?? '',
+                                              notifier.currentChapter?.Title ??
+                                                  '',
                                               textAlign: TextAlign.center,
                                               maxLines: 1,
                                               overflow: TextOverflow.ellipsis,
@@ -1016,13 +1107,21 @@ class _ReaderScreenState extends State<ReaderScreen>
                                                 color: readerTheme.textColor,
                                               ),
                                             ),
-                                            if (notifier.currentBook?.Chapters != null &&
-                                                notifier.currentBook!.Chapters!.length > 1)
+                                            if (notifier
+                                                        .currentBook
+                                                        ?.Chapters !=
+                                                    null &&
+                                                notifier
+                                                        .currentBook!
+                                                        .Chapters!
+                                                        .length >
+                                                    1)
                                               Text(
                                                 'Chapter ${notifier.currentChapterIndex + 1} of ${notifier.currentBook!.Chapters!.length}',
                                                 style: TextStyle(
                                                   fontSize: 12.5,
-                                                  color: readerTheme.textColor.withAlpha(120),
+                                                  color: readerTheme.textColor
+                                                      .withAlpha(120),
                                                 ),
                                               ),
                                           ],
@@ -1038,14 +1137,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                                         color: readerTheme.textColor,
                                       ),
                                       onPressed: () {
-                                        final ttsNotif = context.read<TtsNotifier>();
                                         showModalBottomSheet(
+                                          sheetAnimationStyle: Motion.sheet,
                                           context: context,
                                           backgroundColor: Colors.transparent,
-                                          builder: (_) => ChangeNotifierProvider.value(
-                                            value: ttsNotif,
-                                            child: const SettingsModal(),
-                                          ),
+                                          builder: (_) => const SettingsModal(),
                                         );
                                       },
                                     ),
@@ -1068,46 +1164,53 @@ class _ReaderScreenState extends State<ReaderScreen>
                             return const SizedBox.shrink();
                           }
                           return AnimatedPositioned(
-                            duration: const Duration(milliseconds: 200),
+                            duration: Motion.fast,
+                            curve: Motion.smoothOut,
                             bottom: showUI ? 98 : 24,
                             left: 0,
                             right: 0,
                             child: Center(
-                              child: Material(
-                                color: _accent,
-                                elevation: 3,
-                                borderRadius: BorderRadius.circular(20),
-                                child: InkWell(
+                              // Rises in like a toast.
+                              child: RevealIn(
+                                duration: Motion.slow,
+                                distance: Motion.distanceBase,
+                                blur: Motion.blurSmall,
+                                child: Material(
+                                  color: _accent,
+                                  elevation: 3,
                                   borderRadius: BorderRadius.circular(20),
-                                  onTap: () {
-                                    HapticFeedback.lightImpact();
-                                    _controller.runJavaScript(
-                                      'window.ttsFollowNow();',
-                                    );
-                                  },
-                                  child: const Padding(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 10,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          Icons.record_voice_over,
-                                          size: 16,
-                                          color: Colors.white,
-                                        ),
-                                        SizedBox(width: 8),
-                                        Text(
-                                          'Back to reading',
-                                          style: TextStyle(
+                                  child: InkWell(
+                                    borderRadius: BorderRadius.circular(20),
+                                    onTap: () {
+                                      HapticFeedback.lightImpact();
+                                      _controller.runJavaScript(
+                                        'window.ttsFollowNow();',
+                                      );
+                                    },
+                                    child: const Padding(
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 10,
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            Icons.record_voice_over,
+                                            size: 16,
                                             color: Colors.white,
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w600,
                                           ),
-                                        ),
-                                      ],
+                                          SizedBox(width: 8),
+                                          Text(
+                                            'Back to reading',
+                                            style: TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.w600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -1133,11 +1236,16 @@ class _ReaderScreenState extends State<ReaderScreen>
                 onPopInvokedWithResult: (didPop, _) {
                   if (!didPop) _closeSearch();
                 },
-                child: GlobalSearchOverlay(
-                  readerTheme: readerTheme,
-                  notifier: notifier,
-                  onResultTap: _onSearchResultTap,
-                  onClose: _closeSearch,
+                child: RevealIn(
+                  duration: Motion.fast,
+                  distance: Motion.distanceBase,
+                  blur: 0,
+                  child: GlobalSearchOverlay(
+                    readerTheme: readerTheme,
+                    notifier: notifier,
+                    onResultTap: _onSearchResultTap,
+                    onClose: _closeSearch,
+                  ),
                 ),
               ),
             ),
@@ -1156,15 +1264,22 @@ class _ReaderScreenState extends State<ReaderScreen>
                   // No room below: sit above the selection instead.
                   top = _selectionRect!.top - h - 64;
                 }
-                top = top.clamp(insets.top + 8, size.height - insets.bottom - h - 12);
-                final left = (_selectionRect!.right - w / 2)
-                    .clamp(12.0, size.width - w - 12);
+                top = top.clamp(
+                  insets.top + 8,
+                  size.height - insets.bottom - h - 12,
+                );
+                final left = (_selectionRect!.right - w / 2).clamp(
+                  12.0,
+                  size.width - w - 12,
+                );
                 return Positioned(
                   top: top,
                   left: left,
-                  child: ColorPickerBar(
-                    readerTheme: readerTheme,
-                    onHighlightSelected: _applyHighlight,
+                  child: PopIn(
+                    child: ColorPickerBar(
+                      readerTheme: readerTheme,
+                      onHighlightSelected: _applyHighlight,
+                    ),
                   ),
                 );
               },
@@ -1178,21 +1293,24 @@ class _ReaderScreenState extends State<ReaderScreen>
                 onBackToLibrary: () => context.go('/'),
                 onStayHere: () => setState(() => _showBookComplete = false),
                 onStartOver: () {
-                  final chapters = notifier.currentBook?.Chapters;
-                  if (chapters != null && chapters.isNotEmpty) {
-                    notifier.jumpToChapter(chapters.first);
-                  }
+                  // From the top, not where chapter 1 was once left.
+                  _chapterPositions.remove(0);
+                  _showChapter(
+                    0,
+                    scrollNow: () =>
+                        _controller.runJavaScript('window.scrollTo(0, 0);'),
+                    scrollOnLoad: () {},
+                  );
                   setState(() => _showBookComplete = false);
                 },
               ),
             ),
 
-          // Tutorial overlay covers the full screen including the ad area
+          // Tutorial overlay covers the full screen
           if (_showTutorial)
             Positioned.fill(
               child: ReaderTutorialOverlay(
                 onDismiss: _dismissTutorial,
-                bottomOffset: 50,
                 elementKeys: {
                   'back': _backButtonKey,
                   'highlights': _highlightsIconKey,
@@ -1218,7 +1336,11 @@ class _ReaderScreenState extends State<ReaderScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.redAccent),
+              const Icon(
+                Icons.error_outline,
+                size: 48,
+                color: Colors.redAccent,
+              ),
               const SizedBox(height: 16),
               const Text(
                 "This book couldn't be opened",
@@ -1274,47 +1396,32 @@ class _ReaderScreenState extends State<ReaderScreen>
       }
     } catch (_) {}
     if (!opened && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Couldn\'t open the link.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Couldn\'t open the link.')));
     }
   }
 
-  void _navigateToHighlight(Highlight highlight, ReaderNotifier notifier) {
-    final chapters = notifier.currentBook?.Chapters;
-    if (chapters == null) return;
-
-    final sameChapter = highlight.chapterIndex == notifier.currentChapterIndex;
-
-    if (sameChapter) {
-      // Already on the right chapter — just scroll
-      final safeId = _sanitizeId(highlight.id);
-      _controller.runJavaScript("window.scrollToHighlight('$safeId');");
-    } else {
-      // Different chapter — jump there, then scroll after page loads
-      _pendingScrollHighlightId = highlight.id;
-      if (highlight.chapterIndex < chapters.length) {
-        notifier.jumpToChapter(chapters[highlight.chapterIndex]);
-      }
-    }
+  void _navigateToHighlight(Highlight highlight) {
+    _showChapter(
+      highlight.chapterIndex,
+      scrollNow: () {
+        final safeId = _sanitizeId(highlight.id);
+        _controller.runJavaScript("window.scrollToHighlight('$safeId');");
+      },
+      scrollOnLoad: () => _pendingScrollHighlightId = highlight.id,
+    );
   }
 
-  void _navigateToBookmark(Bookmark bookmark, ReaderNotifier notifier) {
-    final chapters = notifier.currentBook?.Chapters;
-    if (chapters == null) return;
-
-    final sameChapter = bookmark.chapterIndex == notifier.currentChapterIndex;
-    final safeScroll = bookmark.scrollPosition.toInt();
-
-    if (sameChapter) {
-      _controller.runJavaScript('window.scrollTo(0, $safeScroll);');
-    } else {
-      // Jump to the chapter, then scroll after page loads
-      _pendingBookmarkScroll = bookmark.scrollPosition;
-      if (bookmark.chapterIndex < chapters.length) {
-        notifier.jumpToChapter(chapters[bookmark.chapterIndex]);
-      }
-    }
+  void _navigateToBookmark(Bookmark bookmark) {
+    _showChapter(
+      bookmark.chapterIndex,
+      scrollNow: () {
+        final safeScroll = bookmark.scrollPosition.toInt();
+        _controller.runJavaScript('window.scrollTo(0, $safeScroll);');
+      },
+      scrollOnLoad: () => _pendingBookmarkScroll = bookmark.scrollPosition,
+    );
   }
 
   void _restoreHighlights() {
@@ -1325,22 +1432,13 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     if (highlights.isEmpty) return;
 
-    // Build JSON with CSS colors for each highlight
-    const colorMap = <String, String>{
-      'yellow': 'rgba(255, 241, 118, 0.4)',
-      'green': 'rgba(129, 199, 132, 0.4)',
-      'blue': 'rgba(100, 181, 246, 0.4)',
-      'pink': 'rgba(244, 143, 177, 0.4)',
-      'orange': 'rgba(255, 183, 77, 0.4)',
-    };
-
     final jsonList = highlights
         .map(
           (h) => {
             'id': h.id,
             'startOffset': h.startOffset,
             'endOffset': h.endOffset,
-            'color': colorMap[h.color] ?? 'rgba(255, 241, 118, 0.4)',
+            'color': highlightCss(h.color),
           },
         )
         .toList();
@@ -1349,14 +1447,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     _controller.runJavaScript("window.restoreHighlights('$jsonStr');");
   }
 
-  void _applyHighlight(String colorName, Color color) {
+  void _applyHighlight(String colorName) {
     final highlightNotifier = context.read<HighlightNotifier>();
     final notifier = context.read<ReaderNotifier>();
     final chapterIndex = notifier.currentChapterIndex;
 
-    // Convert color to CSS rgba
-    final cssColor =
-        'rgba(${(color.r * 255).round()}, ${(color.g * 255).round()}, ${(color.b * 255).round()}, 0.4)';
+    // The same colour the highlight gets when the chapter is loaded again.
+    final cssColor = highlightCss(colorName);
 
     // Add to state/storage
     highlightNotifier
@@ -1385,25 +1482,25 @@ class _ReaderScreenState extends State<ReaderScreen>
     setState(() => _showColorPicker = false);
 
     // Show undo SnackBar
-    if (mounted) {
-      ScaffoldMessenger.of(context).clearSnackBars();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Text('Highlight added'),
-          duration: const Duration(seconds: 3),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () {
-              final highlights = highlightNotifier.highlightsForChapter(chapterIndex);
-              if (highlights.isNotEmpty) {
-                final latest = highlights.last;
-                highlightNotifier.removeHighlight(latest.id);
-              }
-            },
-          ),
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: const Text('Highlight added'),
+        duration: const Duration(seconds: 3),
+        action: SnackBarAction(
+          label: 'Undo',
+          onPressed: () {
+            final highlights = highlightNotifier.highlightsForChapter(
+              chapterIndex,
+            );
+            if (highlights.isNotEmpty) {
+              final latest = highlights.last;
+              highlightNotifier.removeHighlight(latest.id);
+            }
+          },
         ),
-      );
-    }
+      ),
+    );
   }
 
   bool _isInitialLoad = true;
@@ -1445,10 +1542,15 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// Build dynamic CSS string from current settings.
   /// Used both for initial HTML and for live JS-based CSS updates.
-  String _buildDynamicCss(ReaderSettings settings, {required bool hasCustomFont}) {
+  String _buildDynamicCss(
+    ReaderSettings settings, {
+    required bool hasCustomFont,
+  }) {
     final themeColorHex = _hex(settings.theme.textColor);
     final bgColorHex = _hex(settings.theme.backgroundColor);
-    final linkColor = settings.theme == ReaderTheme.dark ? '#64B5F6' : '#1976D2';
+    final linkColor = settings.theme == ReaderTheme.dark
+        ? '#64B5F6'
+        : '#1976D2';
     final fontFamily = settings.font == ReaderFont.custom
         ? (hasCustomFont ? 'CustomFont' : 'serif')
         : settings.font.fontFamily;
@@ -1469,6 +1571,10 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     html {
       -webkit-overflow-scrolling: touch !important;
+      /* Keep what is scrolled into view (the spoken sentence, a highlight)
+         clear of the top and bottom bars. */
+      scroll-padding-top: ${(_topBarHeight + 8).toInt()}px !important;
+      scroll-padding-bottom: ${(_barHeight + 8).toInt()}px !important;
     }
 
     body {
@@ -1476,7 +1582,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       font-size: ${settings.fontSize.toInt()}px !important;
       line-height: ${settings.lineHeight} !important;
       text-align: ${settings.textAlignment.cssValue} !important;
-      padding: ${(MediaQuery.of(context).padding.top + kToolbarHeight + 8).toInt()}px ${settings.horizontalMargin.toInt()}px 80px !important;
+      padding: ${(_topBarHeight + 8).toInt()}px ${settings.horizontalMargin.toInt()}px 80px !important;
       margin: 0 !important;
       min-height: 100vh !important;
       touch-action: pan-y !important;
@@ -1509,6 +1615,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
 
     /* TTS Highlighting Styles */
+    /* The highlight eases from one sentence to the next. */
+    .tts-para, .tts-sent {
+      transition: background-color 150ms ease-in-out,
+        box-shadow 150ms ease-in-out;
+    }
     .tts-highlight {
       background-color: rgba(91, 61, 227, 0.22) !important;
       box-shadow: 0 0 0 2px rgba(91, 61, 227, 0.3);
@@ -1519,22 +1630,19 @@ class _ReaderScreenState extends State<ReaderScreen>
       box-shadow: none;
     }
 
-    /* Search highlight styles */
-    .search-match {
-      background-color: rgba(255, 235, 59, 0.4) !important;
-      color: inherit !important;
-      border-radius: 2px;
-    }
-    .search-current {
-      background-color: rgba(255, 152, 0, 0.6) !important;
-      box-shadow: 0 0 0 2px rgba(255, 152, 0, 0.4);
-    }
-
     /* User highlight styles */
     .user-highlight {
       color: inherit !important;
       border-radius: 2px;
       padding: 1px 0;
+      animation: velum-mark 250ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    @keyframes velum-mark {
+      from { background-color: transparent; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .tts-para, .tts-sent { transition: none; }
+      .user-highlight { animation: none; }
     }
     ''';
   }
@@ -1556,9 +1664,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     final css = _buildDynamicCss(settings, hasCustomFont: fontCss.isNotEmpty);
     _controller.runJavaScript(
-      "document.getElementById('velum-css').textContent = '${_jsString(css)}';"
-      "document.body.style.cssText = 'color: ${_hex(settings.theme.textColor)} !important; "
-      "background-color: ${_hex(settings.theme.backgroundColor)} !important;';",
+      "document.getElementById('velum-css').textContent = '${_jsString(css)}';",
     );
   }
 
@@ -1599,25 +1705,20 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     if (_isInitialLoad) {
       // First load - try to restore saved position
-      final savedScroll = context
-          .read<ReaderNotifier>()
-          .getSavedScrollPosition(widget.assetPath);
+      final savedScroll = context.read<ReaderNotifier>().getSavedScrollPosition(
+        widget.assetPath,
+      );
       if (savedScroll > 0) {
         _savedScrollPosition = savedScroll;
         _shouldRestoreScroll = true;
       }
       _isInitialLoad = false;
     } else {
-      // Navigation: a bookmark's spot, else where the reader left this
-      // chapter, else the top. Search/highlight jumps scroll on their own.
-      final remembered =
-          _chapterPositions[context.read<ReaderNotifier>().currentChapterIndex];
-      final target = _pendingBookmarkScroll ??
-          (_pendingScrollPercent == null && _pendingScrollHighlightId == null
-              ? remembered?.scroll
-              : null);
+      // Navigation
+      _savedScrollPosition = _openingScroll(
+        context.read<ReaderNotifier>().currentChapterIndex,
+      );
       _pendingBookmarkScroll = null;
-      _savedScrollPosition = target ?? 0;
       _shouldRestoreScroll = _savedScrollPosition > 0;
     }
 
@@ -1625,7 +1726,10 @@ class _ReaderScreenState extends State<ReaderScreen>
 
     final fontCss = _buildFontCss(settings);
     _lastFontCss = fontCss;
-    final dynamicCss = _buildDynamicCss(settings, hasCustomFont: fontCss.isNotEmpty);
+    final dynamicCss = _buildDynamicCss(
+      settings,
+      hasCustomFont: fontCss.isNotEmpty,
+    );
 
     final combinedHtml =
         '''

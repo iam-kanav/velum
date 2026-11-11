@@ -3,7 +3,7 @@ import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 
 /// Bundles the prebuilt Phonon library (native/phonon, built by
-/// native/phonon/build.sh) for the experimental on-device voice, on Android
+/// native/phonon/build.sh) for the on-device voice, on Android
 /// and the Mac. Targets without a prebuilt library (32-bit Android) get none,
 /// and the app reports the voice as unavailable there.
 void main(List<String> args) async {

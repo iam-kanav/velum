@@ -102,6 +102,33 @@ void main() {
       expect(chapters[1].HtmlContent, contains('<section>'));
     });
 
+    test('XHTML self-closed anchors split a file where they stand', () {
+      final chapters = followReadingOrder(
+        [entry('1', 'a', 'x'), entry('2', 'a', 'y')],
+        ['a'],
+        {
+          'a': '<html><head><title/></head><body><p><a id="x"/>One</p>'
+              '<p>More</p><div/><p><a id="y"/>Two</p></body></html>',
+        },
+      );
+      // The emptied paragraph the second anchor sat in stays behind.
+      expect(chapters.map((c) => text(c).trim()), ['One More', 'Two']);
+    });
+
+    test('old-style <a name> anchors are found', () {
+      final chapters = followReadingOrder(
+        [entry('1', 'a'), entry('2', 'a', 'two'), entry('3', 'a', 'three')],
+        ['a'],
+        {
+          'a': page(
+            '<p>One</p><h2><a name="two"></a>Two</h2><p>B</p>'
+            '<a name="three"></a><h2 id="other">Three</h2>',
+          ),
+        },
+      );
+      expect(chapters.map((c) => text(c).trim()), ['One', 'Two B', 'Three']);
+    });
+
     test(
       'files before the first entry stay out, files not in the spine are untouched',
       () {
@@ -118,13 +145,26 @@ void main() {
     );
   });
 
+  test('a book with no table of contents is read file by file', () {
+    final chapters = chaptersFromSpine(
+      ['cover', 'a', 'b'],
+      {'cover': '<p>Cover</p>', 'a': '<p>A</p>', 'b': '<p>B</p>'},
+    );
+    expect(titles(chapters), ['Chapter 1', 'Chapter 2', 'Chapter 3']);
+    expect(chapters.map((c) => c.HtmlContent), [
+      '<p>Cover</p>',
+      '<p>A</p>',
+      '<p>B</p>',
+    ]);
+    expect(chapters.map((c) => c.ContentFileName), ['cover', 'a', 'b']);
+  });
+
   // Optional check against a real nested-TOC book:
   //   VELUM_TEST_EPUB=/path/to/book.epub flutter test test/epub_service_test.dart
   final path = Platform.environment['VELUM_TEST_EPUB'];
   test('real EPUB opens with all chapters', () async {
     final opened = await const EpubService().parseEpub(path!);
     final chapters = opened.book.Chapters!;
-    // ignore: avoid_print
     for (final c in chapters) {
       final words = html_parser
           .parse(c.HtmlContent ?? '')

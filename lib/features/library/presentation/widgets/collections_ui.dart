@@ -5,6 +5,7 @@ import 'package:velum/core/theme/app_colors.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import '../../data/models/book_collection.dart';
 import '../providers/library_notifier.dart';
+import 'package:velum/core/motion/motion.dart';
 
 const Color _accent = AppColors.accent;
 
@@ -219,137 +220,174 @@ Future<CollectionDetails?> showCollectionDialog(
   bool initialHide = false,
   String? helper,
 }) {
-  var hide = initialHide;
-  // Existing name starts selected, so typing replaces it.
-  final controller = TextEditingController(text: initial)
-    ..selection = TextSelection(baseOffset: 0, extentOffset: initial.length);
-  return showDialog<CollectionDetails>(
+  return showMotionDialog<CollectionDetails>(
     context: context,
-    builder: (ctx) => StatefulBuilder(
-      builder: (ctx, setState) {
-        void submit() {
-          final name = controller.text.trim();
-          if (name.isNotEmpty) {
-            Navigator.of(ctx).pop((name: name, hideFromLibrary: hide));
-          }
-        }
-
-        return AlertDialog(
-          backgroundColor: _surface(theme),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          title: Text(
-            title,
-            style: GoogleFonts.inter(
-              color: theme.textColor,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TextField(
-                controller: controller,
-                autofocus: true,
-                textCapitalization: TextCapitalization.sentences,
-                onSubmitted: (_) => submit(),
-                style: GoogleFonts.inter(
-                  color: theme.textColor,
-                  fontSize: 15.5,
-                ),
-                decoration: InputDecoration(
-                  labelText: 'Name',
-                  labelStyle: TextStyle(color: theme.textColor.withAlpha(150)),
-                  floatingLabelStyle: const TextStyle(color: _accent),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: BorderSide(
-                      color: theme.textColor.withAlpha(60),
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide: const BorderSide(color: _accent, width: 2),
-                  ),
-                ),
-              ),
-              if (helper != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  helper,
-                  style: GoogleFonts.inter(
-                    color: theme.textColor.withAlpha(150),
-                    fontSize: 12.5,
-                  ),
-                ),
-              ],
-              const SizedBox(height: 12),
-              InkWell(
-                onTap: () => setState(() => hide = !hide),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Only show in this collection',
-                              style: GoogleFonts.inter(
-                                color: theme.textColor,
-                                fontSize: 14.5,
-                                fontWeight: FontWeight.w500,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Its books won\'t appear in All books',
-                              style: GoogleFonts.inter(
-                                color: theme.textColor.withAlpha(150),
-                                fontSize: 12.5,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Switch(
-                        value: hide,
-                        onChanged: (v) => setState(() => hide = v),
-                        activeThumbColor: Colors.white,
-                        activeTrackColor: _accent,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: Text(
-                'Cancel',
-                style: TextStyle(color: theme.textColor.withAlpha(170)),
-              ),
-            ),
-            FilledButton(
-              onPressed: submit,
-              style: FilledButton.styleFrom(
-                backgroundColor: _accent,
-                foregroundColor: Colors.white,
-              ),
-              child: Text(action),
-            ),
-          ],
-        );
-      },
+    builder: (_) => _CollectionDialog(
+      theme: theme,
+      title: title,
+      action: action,
+      initial: initial,
+      initialHide: initialHide,
+      helper: helper,
     ),
   );
+}
+
+class _CollectionDialog extends StatefulWidget {
+  final ReaderTheme theme;
+  final String title;
+  final String action;
+  final String initial;
+  final bool initialHide;
+  final String? helper;
+
+  const _CollectionDialog({
+    required this.theme,
+    required this.title,
+    required this.action,
+    required this.initial,
+    required this.initialHide,
+    this.helper,
+  });
+
+  @override
+  State<_CollectionDialog> createState() => _CollectionDialogState();
+}
+
+class _CollectionDialogState extends State<_CollectionDialog> {
+  late bool _hide = widget.initialHide;
+  // Existing name starts selected, so typing replaces it.
+  late final TextEditingController _controller =
+      TextEditingController(text: widget.initial)
+        ..selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: widget.initial.length,
+        );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.isNotEmpty) {
+      Navigator.of(context).pop((name: name, hideFromLibrary: _hide));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = widget.theme;
+    final helper = widget.helper;
+    return AlertDialog(
+      backgroundColor: _surface(theme),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+      title: Text(
+        widget.title,
+        style: GoogleFonts.inter(
+          color: theme.textColor,
+          fontSize: 20,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            onSubmitted: (_) => _submit(),
+            style: GoogleFonts.inter(color: theme.textColor, fontSize: 15.5),
+            decoration: InputDecoration(
+              labelText: 'Name',
+              labelStyle: TextStyle(color: theme.textColor.withAlpha(150)),
+              floatingLabelStyle: const TextStyle(color: _accent),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide(color: theme.textColor.withAlpha(60)),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: const BorderSide(color: _accent, width: 2),
+              ),
+            ),
+          ),
+          if (helper != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              helper,
+              style: GoogleFonts.inter(
+                color: theme.textColor.withAlpha(150),
+                fontSize: 12.5,
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          InkWell(
+            onTap: () => setState(() => _hide = !_hide),
+            borderRadius: BorderRadius.circular(12),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Only show in this collection',
+                          style: GoogleFonts.inter(
+                            color: theme.textColor,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Its books won\'t appear in All books',
+                          style: GoogleFonts.inter(
+                            color: theme.textColor.withAlpha(150),
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Switch(
+                    value: _hide,
+                    onChanged: (v) => setState(() => _hide = v),
+                    activeThumbColor: Colors.white,
+                    activeTrackColor: _accent,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(
+            'Cancel',
+            style: TextStyle(color: theme.textColor.withAlpha(170)),
+          ),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          style: FilledButton.styleFrom(
+            backgroundColor: _accent,
+            foregroundColor: Colors.white,
+          ),
+          child: Text(widget.action),
+        ),
+      ],
+    );
+  }
 }
 
 /// Long-press on a collection: edit (name, hide from All books) or delete.
@@ -360,6 +398,7 @@ Future<void> showCollectionOptions(
 ) async {
   final library = context.read<LibraryNotifier>();
   final choice = await showModalBottomSheet<String>(
+    sheetAnimationStyle: Motion.sheet,
     context: context,
     backgroundColor: _surface(theme),
     shape: const RoundedRectangleBorder(
@@ -424,8 +463,7 @@ Future<String?> showAddToCollectionSheet(
   ReaderTheme theme,
   Set<String> bookPaths,
 ) async {
-  final count = bookPaths.length;
-  final countLabel = '$count book${count == 1 ? '' : 's'}';
+  final countLabel = booksLabel(bookPaths.length);
 
   void createNew(BuildContext sheetContext) =>
       Navigator.of(sheetContext).pop('new');
@@ -455,6 +493,7 @@ Future<String?> showAddToCollectionSheet(
 
   final library = context.read<LibraryNotifier>();
   final result = await showModalBottomSheet<String>(
+    sheetAnimationStyle: Motion.sheet,
     context: context,
     isScrollControlled: true,
     backgroundColor: theme.backgroundColor,
@@ -559,8 +598,7 @@ Future<String?> showAddToCollectionSheet(
                           _CollectionTickRow(
                             theme: theme,
                             name: c.name,
-                            subtitle:
-                                '${library.bookCount(c)} book${library.bookCount(c) == 1 ? '' : 's'}',
+                            subtitle: booksLabel(library.bookCount(c)),
                             ticked: bookPaths.every(c.bookPaths.contains),
                             onTap: (ticked) => library.setInCollection(
                               c.id,

@@ -20,10 +20,6 @@ class BookmarkNotifier extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<Bookmark> bookmarksForChapter(int chapterIndex) {
-    return _bookmarks.where((b) => b.chapterIndex == chapterIndex).toList();
-  }
-
   Future<void> addBookmark({
     required int chapterIndex,
     required double scrollPosition,

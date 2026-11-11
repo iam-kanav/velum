@@ -44,20 +44,8 @@ class ScannedBook extends Equatable {
     this.lastReadPosition,
   });
 
-  Map<String, dynamic> toJson() {
-    return {
-      'filePath': filePath,
-      'title': title,
-      'author': author,
-      'addedAt': addedAt?.toIso8601String(),
-      'coverBase64': coverBase64,
-      'isPinned': isPinned,
-      'lastReadTime': lastReadTime?.toIso8601String(),
-      'lastReadChapter': lastReadChapter,
-      'lastReadPosition': lastReadPosition,
-    };
-  }
-
+  /// Reads an entry of the old SharedPreferences library (see the migration
+  /// in LibraryService).
   factory ScannedBook.fromJson(Map<String, dynamic> json) {
     return ScannedBook(
       filePath: json['filePath'] as String,

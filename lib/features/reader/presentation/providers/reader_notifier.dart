@@ -9,7 +9,7 @@ import '../../data/services/epub_service.dart';
 import '../../../tts/data/models/tts_chunk.dart';
 import '../../../library/data/services/library_service.dart';
 
-/// Determine MIME type from filename (used in isolate).
+/// Determine MIME type from filename.
 String _getMimeTypeFromName(String fileName) {
   final lower = fileName.toLowerCase();
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
@@ -47,10 +47,13 @@ List<GlobalSearchResult> _searchChaptersIsolate(Map<String, dynamic> params) {
 
   for (int i = 0; i < chapters.length; i++) {
     final html = chapters[i]['html'] ?? '';
-    final title = chapters[i]['title'] ?? 'Chapter ${i + 1}';
+    final given = chapters[i]['title']?.trim() ?? '';
+    final title = given.isEmpty ? 'Chapter ${i + 1}' : given;
 
     // Parse HTML to plain text
-    final document = html_parser.parse(html);
+    final document = html_parser.parse(
+      ChapterProcessor.expandSelfClosing(html),
+    );
     final body = document.body;
     if (body == null) continue;
     final plainText = body.text;
@@ -107,6 +110,17 @@ class ReaderNotifier extends ChangeNotifier {
     caseSensitive: false,
   );
 
+  /// SVG images (`<image xlink:href="cover.jpeg"/>`, as on Calibre cover
+  /// pages) name their file in href rather than src.
+  static final RegExp _svgImageRegex = RegExp(
+    r'<image\b[^>]*>',
+    caseSensitive: false,
+  );
+  static final RegExp _hrefRegex = RegExp(
+    r'''((?:xlink:)?href)=["']([^"']+)["']''',
+    caseSensitive: false,
+  );
+
   ReaderNotifier(this._epubService, this._libraryService);
 
   String? _currentBookPath;
@@ -128,12 +142,22 @@ class ReaderNotifier extends ChangeNotifier {
   List<int>? Function(String imageName) _readImage = (_) => null;
   Map<String, String> _imageAliases = {};
   Map<String, String> _normalizedImageAliases = {};
-  final Map<String, String> _imageDataUrls = {};
 
-  // Performance: cache processed HTML to avoid expensive re-parsing on every widget rebuild
-  String? _cachedChapterHtml;
-  String? _cachedProcessedHtml;
-  List<TtsParagraph> _cachedParagraphs = const [];
+  /// Encoded images, least recently used first. Only the last few are kept:
+  /// a picture book would otherwise end up in memory whole.
+  final Map<String, String> _imageDataUrls = {};
+  static const _maxCachedImages = 32;
+
+  // Performance: cache processed HTML to avoid expensive re-parsing on every
+  // widget rebuild. [_ahead] is a chapter processed before it is shown.
+  _Processed? _shown;
+  _Processed? _ahead;
+
+  bool _disposed = false;
+
+  void _notify() {
+    if (!_disposed) notifyListeners();
+  }
 
   Future<void> loadBook(String assetPath) async {
     _isLoading = true;
@@ -141,9 +165,8 @@ class ReaderNotifier extends ChangeNotifier {
     _imageAliases = {};
     _normalizedImageAliases = {};
     _imageDataUrls.clear();
-    _cachedChapterHtml = null;
-    _cachedProcessedHtml = null;
-    _cachedParagraphs = const [];
+    _shown = null;
+    _ahead = null;
     _currentBookPath = assetPath;
     notifyListeners();
 
@@ -168,27 +191,45 @@ class ReaderNotifier extends ChangeNotifier {
         } else {
           _currentChapter = chapters.first;
         }
+      } else {
+        // Nothing to show: say so rather than wait for a chapter forever.
+        _currentChapter = null;
+        _errorMessage = 'This book has no chapters.';
       }
     } catch (e) {
       _errorMessage = e.toString();
     } finally {
       _isLoading = false;
-      notifyListeners();
+      // The reader may have been closed while the book was being read.
+      _notify();
     }
+  }
+
+  /// Where the current chapter is in the book, or -1 before one is loaded.
+  /// By identity: epubx compares chapters by value, so two contents entries
+  /// with the same title and text would both count as the first of them.
+  int get _chapterIndex {
+    final current = _currentChapter;
+    final chapters = _currentBook?.Chapters;
+    if (current == null || chapters == null) return -1;
+    return chapters.indexWhere((c) => identical(c, current));
   }
 
   /// Get current chapter index
   int get currentChapterIndex {
-    if (_currentBook?.Chapters == null || _currentChapter == null) return 0;
-    return _currentBook!.Chapters!.indexOf(_currentChapter!);
+    final index = _chapterIndex;
+    return index < 0 ? 0 : index;
   }
 
-  /// Save reading position (chapter index + scroll position)
+  /// Save reading position (chapter index + scroll position). Does nothing
+  /// until a chapter is showing: while a book is still loading, or failed to
+  /// load, there is no position, and saving would reset it to chapter 1.
   Future<void> saveReadingPosition(double scrollPosition) async {
-    if (_currentBookPath == null) return;
+    final index = _chapterIndex;
+    if (_currentBookPath == null || index < 0) return;
     await _libraryService.updateReadingProgress(
       _currentBookPath!,
-      currentChapterIndex,
+      index,
       scrollPosition,
     );
   }
@@ -234,10 +275,20 @@ class ReaderNotifier extends ChangeNotifier {
     if (htmlContent == null) return '';
     if (_imageAliases.isEmpty) return htmlContent;
 
-    return htmlContent.replaceAllMapped(_srcRegex, (match) {
+    final html = htmlContent.replaceAllMapped(_srcRegex, (match) {
       final dataUrl = _findImageDataUrl(match.group(1) ?? '');
       return dataUrl != null ? 'src="$dataUrl"' : match.group(0)!;
     });
+    if (!html.contains('<image')) return html;
+    return html.replaceAllMapped(
+      _svgImageRegex,
+      (tag) => tag.group(0)!.replaceAllMapped(_hrefRegex, (match) {
+        final dataUrl = _findImageDataUrl(match.group(2) ?? '');
+        return dataUrl != null
+            ? '${match.group(1)}="$dataUrl"'
+            : match.group(0)!;
+      }),
+    );
   }
 
   String? _findImageDataUrl(String src) {
@@ -248,12 +299,18 @@ class ReaderNotifier extends ChangeNotifier {
         _normalizedImageAliases[src.split('/').last.toLowerCase()];
     if (fileName == null) return null;
 
-    final cached = _imageDataUrls[fileName];
-    if (cached != null) return cached;
-    final bytes = _readImage(fileName);
-    if (bytes == null) return null;
-    return _imageDataUrls[fileName] =
-        'data:${_getMimeTypeFromName(fileName)};base64,${base64Encode(bytes)}';
+    // Taken out and put back so the map stays in order of last use.
+    var dataUrl = _imageDataUrls.remove(fileName);
+    if (dataUrl == null) {
+      final bytes = _readImage(fileName);
+      if (bytes == null) return null;
+      dataUrl =
+          'data:${_getMimeTypeFromName(fileName)};base64,${base64Encode(bytes)}';
+      if (_imageDataUrls.length >= _maxCachedImages) {
+        _imageDataUrls.remove(_imageDataUrls.keys.first);
+      }
+    }
+    return _imageDataUrls[fileName] = dataUrl;
   }
 
   bool _showUI = true;
@@ -295,20 +352,21 @@ class ReaderNotifier extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _autoHideTimer?.cancel();
     super.dispose();
   }
 
-  Future<void> jumpToChapter(EpubChapter chapter) async {
+  void jumpToChapter(EpubChapter chapter) {
     _currentChapter = chapter;
     notifyListeners();
   }
 
   void nextChapter() {
-    if (_currentBook == null || _currentChapter == null) return;
+    final index = _chapterIndex;
+    if (index < 0) return;
 
     final chapters = _currentBook!.Chapters!;
-    final index = chapters.indexOf(_currentChapter!);
     if (index < chapters.length - 1) {
       _currentChapter = chapters[index + 1];
       notifyListeners();
@@ -316,12 +374,9 @@ class ReaderNotifier extends ChangeNotifier {
   }
 
   void previousChapter() {
-    if (_currentBook == null || _currentChapter == null) return;
-
-    final chapters = _currentBook!.Chapters!;
-    final index = chapters.indexOf(_currentChapter!);
+    final index = _chapterIndex;
     if (index > 0) {
-      _currentChapter = chapters[index - 1];
+      _currentChapter = _currentBook!.Chapters![index - 1];
       notifyListeners();
     }
   }
@@ -330,7 +385,19 @@ class ReaderNotifier extends ChangeNotifier {
   /// the rendered page's data-para / data-sent attributes.
   List<TtsParagraph> get ttsParagraphs {
     getProcessedHtml();
-    return _cachedParagraphs;
+    return _shown?.paragraphs ?? const [];
+  }
+
+  /// Paragraphs of a chapter (given its HTML from the book) that read-aloud
+  /// is about to carry on into. The result is kept, so the page that then
+  /// turns to that chapter doesn't process it a second time.
+  List<TtsParagraph> paragraphsOf(String rawHtml) {
+    // With the reader closed there is no page: the text alone is enough
+    // (inlining images doesn't change it).
+    if (_disposed) return ChapterProcessor.process(rawHtml).$2;
+    if (rawHtml == _shown?.raw) return _shown!.paragraphs;
+    if (rawHtml != _ahead?.raw) _ahead = _process(rawHtml);
+    return _ahead!.paragraphs;
   }
 
   /// Get processed HTML with images replaced and sentences wrapped for TTS.
@@ -338,14 +405,19 @@ class ReaderNotifier extends ChangeNotifier {
   String getProcessedHtml() {
     final rawHtml = _currentChapter?.HtmlContent;
     if (rawHtml == null) return '';
-    if (rawHtml == _cachedChapterHtml && _cachedProcessedHtml != null) {
-      return _cachedProcessedHtml!;
+    if (rawHtml != _shown?.raw) {
+      _shown = rawHtml == _ahead?.raw ? _ahead : _process(rawHtml);
+      _ahead = null;
     }
-    _cachedChapterHtml = rawHtml;
+    return _shown!.html;
+  }
+
+  _Processed _process(String rawHtml) {
     final (html, paragraphs) =
         ChapterProcessor.process(processHtmlWithImages(rawHtml));
-    _cachedProcessedHtml = html;
-    _cachedParagraphs = paragraphs;
-    return html;
+    return (raw: rawHtml, html: html, paragraphs: paragraphs);
   }
 }
+
+/// A chapter's HTML as stored in the book ([raw]) and as shown on the page.
+typedef _Processed = ({String raw, String html, List<TtsParagraph> paragraphs});

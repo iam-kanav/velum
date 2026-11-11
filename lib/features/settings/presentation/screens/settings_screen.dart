@@ -1,14 +1,39 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:provider/provider.dart';
+import 'package:velum/features/settings/data/models/custom_font.dart';
 import 'package:velum/features/settings/data/models/reader_settings.dart';
 import 'package:velum/features/settings/presentation/providers/settings_notifier.dart';
+import 'package:velum/features/settings/presentation/widgets/reader_controls.dart';
 import 'package:velum/features/library/presentation/providers/library_notifier.dart';
+import 'package:velum/features/library/presentation/widgets/storage_access.dart';
 import 'package:velum/core/theme/app_colors.dart';
 import 'package:velum/features/notes/data/clipboard_listen.dart';
 
 const Color _accent = AppColors.accent;
+
+// The user's fonts that were loaded for the preview, by font id. (The
+// reader doesn't need this: it uses the font files through CSS.)
+final Map<String, Future<String?>> _previewFonts = {};
+
+/// The family name [font] can be used under in the preview, or null if its
+/// file can't be read.
+Future<String?> _previewFamily(CustomFont font) =>
+    _previewFonts[font.id] ??= () async {
+      final family = 'custom_${font.id}';
+      try {
+        final bytes = await File(font.path).readAsBytes();
+        final loader = FontLoader(family)
+          ..addFont(Future.value(ByteData.sublistView(bytes)));
+        await loader.load();
+        return family;
+      } catch (_) {
+        return null;
+      }
+    }();
 
 class SettingsScreen extends StatelessWidget {
   const SettingsScreen({super.key});
@@ -61,10 +86,10 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _buildThemeRow(
-                  settings.appTheme,
-                  appTheme,
-                  (theme) => settingsNotifier.updateAppTheme(theme),
+                ThemeCircles(
+                  selected: settings.appTheme,
+                  onSelect: settingsNotifier.updateAppTheme,
+                  labelColor: appTheme.textColor,
                 ),
               ],
             ),
@@ -114,10 +139,10 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _buildThemeRow(
-                  settings.readerTheme,
-                  appTheme,
-                  (theme) => settingsNotifier.updateReaderTheme(theme),
+                ThemeCircles(
+                  selected: settings.readerTheme,
+                  onSelect: settingsNotifier.updateReaderTheme,
+                  labelColor: appTheme.textColor,
                 ),
               ],
             ),
@@ -135,37 +160,19 @@ class SettingsScreen extends StatelessWidget {
                 const SizedBox(height: 20),
 
                 // Font Family
-                _buildSettingLabel('Font Family', appTheme),
+                SettingLabel('Font Family', theme: appTheme),
                 const SizedBox(height: 12),
-                _buildFontChips(settingsNotifier, appTheme),
+                FontChips(notifier: settingsNotifier, theme: appTheme),
 
                 const SizedBox(height: 24),
 
-                // Font Size
-                _buildSliderRow(
-                  'Font Size',
-                  '${settings.fontSize.toInt()}px',
-                  settings.fontSize,
-                  12,
-                  32,
-                  10,
-                  (val) => settingsNotifier.updateFontSize(val),
-                  appTheme,
-                ),
+                TypographySliders(notifier: settingsNotifier, theme: appTheme),
 
                 const SizedBox(height: 20),
 
-                // Line Height
-                _buildSliderRow(
-                  'Line Height',
-                  settings.lineHeight.toStringAsFixed(1),
-                  settings.lineHeight,
-                  1.0,
-                  2.5,
-                  15,
-                  (val) => settingsNotifier.updateLineHeight(val),
-                  appTheme,
-                ),
+                SettingLabel('Text Alignment', theme: appTheme),
+                const SizedBox(height: 12),
+                TextAlignmentChips(notifier: settingsNotifier, theme: appTheme),
               ],
             ),
           ),
@@ -204,15 +211,16 @@ class SettingsScreen extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 16),
-                _buildSliderRow(
-                  'Swipe Distance',
-                  '${(settings.chapterSwipeDistance * 100).round()}% of screen',
-                  settings.chapterSwipeDistance,
-                  0.10,
-                  0.40,
-                  15,
-                  (val) => settingsNotifier.updateChapterSwipeDistance(val),
-                  appTheme,
+                SettingSlider(
+                  label: 'Swipe Distance',
+                  valueLabel:
+                      '${(settings.chapterSwipeDistance * 100).round()}% of screen',
+                  value: settings.chapterSwipeDistance,
+                  min: 0.10,
+                  max: 0.40,
+                  divisions: 15,
+                  onChanged: settingsNotifier.updateChapterSwipeDistance,
+                  theme: appTheme,
                 ),
               ],
             ),
@@ -258,23 +266,7 @@ class SettingsScreen extends StatelessWidget {
                 value: libraryNotifier.isAutoScanEnabled,
                 activeThumbColor: _accent,
                 onChanged: (value) async {
-                  if (value) {
-                    final granted = await libraryNotifier
-                        .requestStoragePermission();
-                    if (!granted) {
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Storage permission is required for auto-scan',
-                            ),
-                            behavior: SnackBarBehavior.floating,
-                          ),
-                        );
-                      }
-                      return;
-                    }
-                  }
+                  if (value && !await requestStorageAccess(context)) return;
                   await libraryNotifier.setAutoScanEnabled(value);
                 },
               ),
@@ -289,31 +281,15 @@ class SettingsScreen extends StatelessWidget {
               onPressed: libraryNotifier.isScanning
                   ? null
                   : () async {
-                      final granted = await libraryNotifier
-                          .hasStoragePermission();
-                      if (!granted) {
-                        final result = await libraryNotifier
-                            .requestStoragePermission();
-                        if (!result) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Storage permission is required to scan',
-                                ),
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          }
-                          return;
-                        }
-                      }
-                      await libraryNotifier.scanDevice();
-                      if (context.mounted) {
+                      if (!await requestStorageAccess(context)) return;
+                      final found = await libraryNotifier.scanDevice();
+                      if (found != null && context.mounted) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
-                              'Found ${libraryNotifier.books.length} books',
+                              found == 0
+                                  ? 'No new books found'
+                                  : 'Found $found new book${found == 1 ? '' : 's'}',
                             ),
                             behavior: SnackBarBehavior.floating,
                           ),
@@ -351,7 +327,7 @@ class SettingsScreen extends StatelessWidget {
           if (libraryNotifier.books.isNotEmpty) ...[
             const SizedBox(height: 12),
             Text(
-              '${libraryNotifier.books.length} book${libraryNotifier.books.length == 1 ? '' : 's'} in library',
+              '${booksLabel(libraryNotifier.books.length)} in library',
               style: TextStyle(
                 fontSize: 12,
                 color: appTheme.textColor.withAlpha(120),
@@ -409,271 +385,22 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSettingLabel(String label, ReaderTheme theme) {
-    return Text(
-      label,
-      style: TextStyle(
-        fontSize: 14,
-        fontWeight: FontWeight.w500,
-        color: theme.textColor.withAlpha(200),
-      ),
-    );
-  }
-
-  Widget _buildThemeRow(
-    ReaderTheme selectedTheme,
-    ReaderTheme displayTheme,
-    void Function(ReaderTheme) onSelect,
-  ) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceAround,
-      children: ReaderTheme.values.map((theme) {
-        final isSelected = selectedTheme == theme;
-        return GestureDetector(
-          onTap: () => onSelect(theme),
-          child: Column(
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: theme.backgroundColor,
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: isSelected
-                        ? _accent
-                        : Colors.grey.withAlpha(60),
-                    width: isSelected ? 3 : 1,
-                  ),
-                  boxShadow: isSelected
-                      ? [
-                          BoxShadow(
-                            color: _accent.withAlpha(60),
-                            blurRadius: 12,
-                            spreadRadius: 2,
-                          ),
-                        ]
-                      : null,
-                ),
-                child: Center(
-                  child: Text(
-                    'Aa',
-                    style: TextStyle(
-                      color: theme.textColor,
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                theme.displayName,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: displayTheme.textColor.withAlpha(
-                    isSelected ? 255 : 150,
-                  ),
-                  fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-            ],
-          ),
-        );
-      }).toList(),
-    );
-  }
-
-  Widget _buildFontChips(SettingsNotifier notifier, ReaderTheme theme) {
-    final settings = notifier.settings;
-
-    return Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      children: [
-        ...ReaderFont.values.where((f) => f != ReaderFont.custom).map((font) {
-          final isSelected = settings.font == font;
-          final displayName = font == ReaderFont.serif
-              ? 'Serif'
-              : font == ReaderFont.sans
-              ? 'Sans Serif'
-              : 'Monospace';
-          return GestureDetector(
-            onTap: () => notifier.updateFont(font),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: isSelected ? _accent : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: isSelected ? _accent : Colors.grey.withAlpha(80),
-                  width: 1.5,
-                ),
-              ),
-              child: Text(
-                displayName,
-                style: _fontChipStyle(font, isSelected, theme),
-              ),
-            ),
-          );
-        }),
-        // Custom Font Chips
-        ...settings.customFonts.map((customFont) {
-          final isSelected =
-              settings.font == ReaderFont.custom &&
-              settings.selectedCustomFontId == customFont.id;
-          return GestureDetector(
-            onTap: () => notifier.selectCustomFont(customFont.id),
-            onLongPress: () => notifier.removeCustomFont(customFont.id),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: isSelected ? _accent : Colors.transparent,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: isSelected ? _accent : Colors.grey.withAlpha(80),
-                  width: 1.5,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    customFont.name,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: isSelected ? Colors.white : theme.textColor,
-                      fontWeight: isSelected
-                          ? FontWeight.w600
-                          : FontWeight.normal,
-                    ),
-                  ),
-                  if (isSelected) ...[
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () => notifier.removeCustomFont(customFont.id),
-                      child: Icon(Icons.close, size: 14, color: Colors.white),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          );
-        }),
-        // Add Font Button
-        GestureDetector(
-          onTap: () => notifier.importCustomFont(),
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: theme.textColor.withAlpha(60),
-                style: BorderStyle.solid,
-              ),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.add, size: 16, color: theme.textColor),
-                const SizedBox(width: 4),
-                Text(
-                  'Add',
-                  style: TextStyle(fontSize: 13, color: theme.textColor),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  TextStyle _fontChipStyle(
-    ReaderFont font,
-    bool isSelected,
-    ReaderTheme theme,
-  ) {
-    final color = isSelected ? Colors.white : theme.textColor;
-    final weight = isSelected ? FontWeight.w600 : FontWeight.normal;
-    switch (font) {
-      case ReaderFont.serif:
-        return GoogleFonts.merriweather(
-          fontSize: 13, color: color, fontWeight: weight);
-      case ReaderFont.sans:
-        return GoogleFonts.inter(
-          fontSize: 13, color: color, fontWeight: weight);
-      case ReaderFont.mono:
-        return GoogleFonts.robotoMono(
-          fontSize: 13, color: color, fontWeight: weight);
-      case ReaderFont.custom:
-        return TextStyle(fontSize: 13, color: color, fontWeight: weight);
-    }
-  }
-
-  Widget _buildSliderRow(
-    String label,
-    String value,
-    double currentValue,
-    double min,
-    double max,
-    int divisions,
-    void Function(double) onChanged,
-    ReaderTheme theme,
-  ) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            _buildSettingLabel(label, theme),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: theme == ReaderTheme.dark
-                    ? Colors.white.withAlpha(15)
-                    : Colors.black.withAlpha(8),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                value,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: theme.textColor,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        SliderTheme(
-          data: SliderThemeData(
-            activeTrackColor: _accent,
-            inactiveTrackColor: Colors.grey.withAlpha(60),
-            thumbColor: _accent,
-            overlayColor: _accent.withAlpha(30),
-            trackHeight: 4,
-          ),
-          child: Slider(
-            value: currentValue,
-            min: min,
-            max: max,
-            divisions: divisions,
-            onChanged: onChanged,
-          ),
-        ),
-      ],
-    );
-  }
-
   Widget _buildLivePreview(ReaderSettings settings) {
     final readerTheme = settings.readerTheme;
+    final customFont = settings.font == ReaderFont.custom
+        ? settings.customFonts
+              .where((font) => font.id == settings.selectedCustomFontId)
+              .firstOrNull
+        : null;
+    Widget sample(String? fontFamily) => Text(
+      'The quick brown fox jumps over the lazy dog.\n\n'
+      'Lorem ipsum dolor sit amet, consectetur adipiscing elit. '
+      'Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
+      style: _previewTextStyle(
+        settings,
+        readerTheme,
+      ).copyWith(fontFamily: fontFamily),
+    );
 
     return Container(
       height: 160,
@@ -684,17 +411,20 @@ class SettingsScreen extends StatelessWidget {
         border: Border.all(color: Colors.grey.withAlpha(40), width: 1),
       ),
       child: SingleChildScrollView(
-        child: Text(
-          'The quick brown fox jumps over the lazy dog.\n\n'
-          'Lorem ipsum dolor sit amet, consectetur adipiscing elit. '
-          'Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.',
-          style: _previewTextStyle(settings, readerTheme),
-        ),
+        child: customFont == null
+            ? sample(null)
+            : FutureBuilder<String?>(
+                future: _previewFamily(customFont),
+                builder: (context, loaded) => sample(loaded.data),
+              ),
       ),
     );
   }
 
-  TextStyle _previewTextStyle(ReaderSettings settings, ReaderTheme readerTheme) {
+  TextStyle _previewTextStyle(
+    ReaderSettings settings,
+    ReaderTheme readerTheme,
+  ) {
     final base = TextStyle(
       fontSize: settings.fontSize,
       height: settings.lineHeight,
@@ -795,11 +525,7 @@ class _ClipboardListenSettingState extends State<_ClipboardListenSetting> {
                 color: theme.textColor.withAlpha(200),
               ),
             ),
-            Switch(
-              value: _enabled,
-              activeThumbColor: _accent,
-              onChanged: _set,
-            ),
+            Switch(value: _enabled, activeThumbColor: _accent, onChanged: _set),
           ],
         ),
       ],

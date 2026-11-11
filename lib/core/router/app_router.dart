@@ -47,11 +47,8 @@ GoRouter createAppRouter(LibraryNotifier libraryNotifier) {
         // If onboarding is not complete, redirect to onboarding unless already there
         return isOnboarding ? null : '/onboarding';
       }
-      if (isOnboarding && libraryNotifier.isOnboardingComplete) {
-        // If onboarding is complete but we are at onboarding, go to library
-        return '/';
-      }
-      return null;
+      // If onboarding is complete but we are at onboarding, go to library
+      return isOnboarding ? '/' : null;
     },
     routes: [
       GoRoute(
@@ -67,11 +64,8 @@ GoRouter createAppRouter(LibraryNotifier libraryNotifier) {
           GoRoute(
             path: 'reader',
             builder: (context, state) {
-              final path = state.uri.queryParameters['path'];
-              if (path == null || path.isEmpty) {
-                // Fallback to library if no path provided
-                return const LibraryScreen();
-              }
+              // Every way into the reader names the book.
+              final path = state.uri.queryParameters['path']!;
               return MultiProvider(
                 // Opening another book from a book ("Listen to clipboard")
                 // must start a fresh reader, not reuse this one.

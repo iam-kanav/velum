@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:velum/core/storage/book_data.dart';
 import '../models/bookmark.dart';
 
 class BookmarkService {
@@ -7,14 +8,12 @@ class BookmarkService {
 
   BookmarkService(this._prefs);
 
-  String _key(String bookPath) => 'bookmarks_${bookPath.hashCode}';
-
-  List<Bookmark> getBookmarks(String bookPath) {
-    final json = _prefs.getString(_key(bookPath));
-    if (json == null) return [];
-    final list = jsonDecode(json) as List;
-    return list.map((e) => Bookmark.fromJson(e as Map<String, dynamic>)).toList();
-  }
+  List<Bookmark> getBookmarks(String bookPath) => BookData.readRecords(
+    _prefs,
+    BookData.bookmarks,
+    bookPath,
+    Bookmark.fromJson,
+  );
 
   Future<void> addBookmark(Bookmark bookmark) async {
     final bookmarks = getBookmarks(bookmark.bookPath);
@@ -30,6 +29,6 @@ class BookmarkService {
 
   Future<void> _save(String bookPath, List<Bookmark> bookmarks) async {
     final json = jsonEncode(bookmarks.map((b) => b.toJson()).toList());
-    await _prefs.setString(_key(bookPath), json);
+    await BookData.write(_prefs, BookData.bookmarks, bookPath, json);
   }
 }

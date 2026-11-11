@@ -36,10 +36,38 @@ void main() {
   test('a book removed from the library leaves every collection', () async {
     await service.create('One', ['/a.epub', '/b.epub']);
     await service.create('Two', ['/a.epub']);
-    await service.forgetBook('/a.epub');
+    await service.forgetBooks(['/a.epub']);
     expect(service.load().map((c) => c.bookPaths), [
       ['/b.epub'],
       <String>[],
+    ]);
+  });
+
+  test('a book whose file moved keeps its place in its collections', () async {
+    await service.create('One', ['/a.epub', '/b.epub']);
+    await service.create('Two', ['/c.epub']);
+    await service.moveBooks({'/a.epub': '/new/a.epub'});
+    expect(service.load().map((c) => c.bookPaths), [
+      ['/new/a.epub', '/b.epub'],
+      ['/c.epub'],
+    ]);
+  });
+
+  test('a collection that cannot be read does not take the others', () async {
+    SharedPreferences.setMockInitialValues({
+      'book_collections':
+          '[{"id":"1","name":"Kept","bookPaths":["/a.epub"]},'
+          '{"id":"2"},"junk",'
+          '{"id":"3","name":"Also kept"}]',
+    });
+    service = CollectionService(await SharedPreferences.getInstance());
+    expect(service.load().map((c) => c.name), ['Kept', 'Also kept']);
+
+    // A later change saves the readable ones, not an empty list.
+    await service.setMembership('3', ['/b.epub'], true);
+    expect(service.load().map((c) => c.bookPaths), [
+      ['/a.epub'],
+      ['/b.epub'],
     ]);
   });
 }

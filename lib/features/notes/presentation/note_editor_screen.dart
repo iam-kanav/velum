@@ -11,13 +11,19 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../../library/presentation/providers/library_notifier.dart';
 import '../../settings/presentation/providers/settings_notifier.dart';
 import '../data/note_service.dart';
+import 'package:velum/core/motion/motion.dart';
 
-/// Write or paste a text ("Create New") — e.g. a whole Google Doc — so it can
+/// Write or paste a text ("New note") — e.g. a whole Google Doc — so it can
 /// be read and listened to like a book. Pass [path] to edit an existing one.
 class NoteEditorScreen extends StatefulWidget {
   final String? path;
 
   const NoteEditorScreen({super.key, this.path});
+
+  /// Whether an open editor holds text that hasn't been saved. Whatever is
+  /// about to replace the open screens should check this first.
+  static bool get hasUnsavedChanges => _unsavedEditors > 0;
+  static int _unsavedEditors = 0;
 
   @override
   State<NoteEditorScreen> createState() => _NoteEditorScreenState();
@@ -29,6 +35,12 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
   Completer<Map<String, dynamic>>? _pendingDoc;
   bool _dirty = false;
   bool _saving = false;
+
+  void _setDirty(bool dirty) {
+    if (dirty == _dirty) return;
+    _dirty = dirty;
+    NoteEditorScreen._unsavedEditors += dirty ? 1 : -1;
+  }
 
   static String _hex(Color c) =>
       '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0')}';
@@ -56,7 +68,15 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       ..loadFlutterAsset('assets/js/editor.html');
   }
 
+  @override
+  void dispose() {
+    _setDirty(false);
+    super.dispose();
+  }
+
   Future<void> _onLoaded() async {
+    // The page can finish loading after the editor was closed.
+    if (!mounted) return;
     final theme = context.read<SettingsNotifier>().settings.readerTheme;
     await _controller.runJavaScript(
       "window.setTheme('${_hex(theme.textColor)}', "
@@ -66,19 +86,21 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
     final path = widget.path;
     if (path != null) {
       final note = await _notes.load(path);
+      if (!mounted) return;
       if (note != null) {
         await _controller.runJavaScript(
           'window.setDoc(${jsonEncode(note.title)}, ${jsonEncode(note.html)});',
         );
       }
     }
+    if (!mounted) return;
     await _controller.runJavaScript('window.focusEditor();');
   }
 
   void _onMessage(JavaScriptMessage message) {
     final text = message.message;
     if (text == 'dirty') {
-      _dirty = true;
+      if (mounted) _setDirty(true);
     } else if (text.startsWith('doc:')) {
       _pendingDoc?.complete(jsonDecode(text.substring(4)) as Map<String, dynamic>);
       _pendingDoc = null;
@@ -109,9 +131,9 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       if (!mounted) return;
       await context.read<LibraryNotifier>().saveNote(path, title);
       if (!mounted) return;
-      _dirty = false;
+      _setDirty(false);
       if (widget.path == null) {
-        // New file: open it straight away, ready to read or listen to.
+        // New note: open it straight away, ready to read or listen to.
         context.pushReplacement('/reader?path=${Uri.encodeComponent(path)}');
       } else {
         context.pop(true);
@@ -133,7 +155,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
 
   Future<void> _confirmDiscard() async {
     final theme = context.read<SettingsNotifier>().settings.readerTheme;
-    final discard = await showDialog<bool>(
+    final discard = await showMotionDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: theme.backgroundColor,
@@ -158,7 +180,7 @@ class _NoteEditorScreenState extends State<NoteEditorScreen> {
       ),
     );
     if (discard == true && mounted) {
-      _dirty = false;
+      _setDirty(false);
       context.pop();
     }
   }

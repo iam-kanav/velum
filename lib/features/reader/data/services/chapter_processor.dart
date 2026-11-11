@@ -21,24 +21,81 @@ class ChapterProcessor {
   /// Returns the processed body HTML and its paragraphs. Paragraph i matches
   /// `data-para="i"`; sentence s of it matches `data-sent="s"`.
   static (String, List<TtsParagraph>) process(String htmlContent) {
-    final body = html_parser.parse(htmlContent).body;
+    final body = html_parser.parse(expandSelfClosing(htmlContent)).body;
     if (body == null) return (htmlContent, const []);
 
+    _removeScripts(body);
     _wrapLooseText(body);
 
     final paragraphs = <TtsParagraph>[];
     for (final p in leafBlocks(body)) {
-      final text = p.text.trim();
+      final (plain, nodes, starts) = _blockText(p);
+      final text = plain.trim();
       if (text.isEmpty) continue;
       final paraIndex = paragraphs.length;
 
-      final spoken = _wrapSentences(p, paraIndex);
+      final spoken = _wrapSentences(plain, nodes, starts, paraIndex);
       p.attributes['data-para'] = paraIndex.toString();
       p.classes.add('tts-para');
       paragraphs.add(TtsParagraph(text, spoken));
     }
 
     return (body.innerHtml, paragraphs);
+  }
+
+  /// Elements that never have content, so `<br/>` already means `<br>`.
+  static const _voidElements = {
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link',
+    'meta', 'param', 'source', 'track', 'wbr',
+  };
+
+  /// A tag closed with `/>`: its name, then its attributes (quoted values
+  /// may hold any character).
+  static final _selfClosed = RegExp(
+    r"""<([A-Za-z][\w:.-]*)((?:[^<>"'/]|"[^"]*"|'[^']*'|/(?!>))*)/>""",
+  );
+
+  /// EPUB chapters are XHTML, where `<a id="x"/>` or `<title/>` is a whole
+  /// element. The HTML parser reads those as opening tags, which wraps the
+  /// rest of the chapter in a link or swallows it into the title. Write them
+  /// out as `<a id="x"></a>` before parsing.
+  static String expandSelfClosing(String xhtml) {
+    if (!xhtml.contains('/>')) return xhtml;
+    return xhtml.replaceAllMapped(_selfClosed, (m) {
+      final name = m[1]!;
+      if (_voidElements.contains(name.toLowerCase())) return m[0]!;
+      return '<$name${m[2]}></$name>';
+    });
+  }
+
+  /// The page a book is shown in can talk to the app, so nothing from the
+  /// book may run there: drop scripts, inline event handlers and
+  /// `javascript:` links. Scripts would otherwise be read aloud as well.
+  static void _removeScripts(dom.Element body) {
+    for (final el in body.querySelectorAll('*')) {
+      if (el.localName == 'script') {
+        el.remove();
+        continue;
+      }
+      el.attributes.removeWhere((name, value) {
+        final key = name is dom.AttributeName ? name.name : name as String;
+        return key.toLowerCase().startsWith('on') || _isScriptUrl(value);
+      });
+    }
+  }
+
+  /// True for a `javascript:` URL as a browser reads it: any case, with
+  /// whitespace and control characters skipped.
+  static bool _isScriptUrl(String value) {
+    const scheme = 'javascript:';
+    var matched = 0;
+    for (var i = 0; i < value.length && matched < scheme.length; i++) {
+      final c = value.codeUnitAt(i);
+      if (c <= 0x20) continue;
+      if ((c | 0x20) != scheme.codeUnitAt(matched)) return false;
+      matched++;
+    }
+    return matched == scheme.length;
   }
 
   /// Block elements that contain no other matched block, so wrapper divs
@@ -103,39 +160,61 @@ class ChapterProcessor {
     }
   }
 
-  /// Mark the sentences of block [p] and return their spoken text. Returns an
-  /// empty list (and changes nothing) when [p] holds a single sentence.
-  static List<TtsSentence> _wrapSentences(dom.Element p, int paraIndex) {
-    final texts = <dom.Text>[];
+  /// The text of block [p] as it is read aloud, with the text nodes it is
+  /// made of and where each starts in it. A `<br>` reads as a space that
+  /// belongs to no node, so lines of verse aren't glued together.
+  static (String, List<dom.Text>, List<int>) _blockText(dom.Element p) {
+    final plain = StringBuffer();
+    final nodes = <dom.Text>[];
+    final starts = <int>[];
     void collect(dom.Node node) {
       for (final child in node.nodes) {
         if (child is dom.Text) {
-          texts.add(child);
-        } else if (child is dom.Element &&
-            child.localName != 'script' &&
-            child.localName != 'style') {
-          collect(child);
+          nodes.add(child);
+          starts.add(plain.length);
+          plain.write(child.data);
+        } else if (child is dom.Element) {
+          if (child.localName == 'br') {
+            plain.write(' ');
+          } else if (child.localName != 'style') {
+            collect(child);
+          }
         }
       }
     }
 
     collect(p);
-    final plain = texts.map((t) => t.data).join();
+    return (plain.toString(), nodes, starts);
+  }
+
+  /// Mark the sentences of a block (see [_blockText]) and return their
+  /// spoken text. Returns an empty list (and changes nothing) when the block
+  /// holds a single sentence.
+  static List<TtsSentence> _wrapSentences(
+    String plain,
+    List<dom.Text> nodes,
+    List<int> starts,
+    int paraIndex,
+  ) {
     final ranges = sentenceRanges(plain);
     if (ranges.length < 2) return const [];
 
     // Split each text node at sentence edges and wrap the in-sentence pieces.
-    var offset = 0;
-    for (final node in texts) {
-      final start = offset;
-      final end = start + node.data.length;
-      offset = end;
+    // Nodes and sentences are both in reading order, so [s] only moves on.
+    var s = 0;
+    for (var n = 0; n < nodes.length; n++) {
+      final node = nodes[n];
+      final end = starts[n] + node.data.length;
 
       final pieces = <dom.Node>[];
-      var pos = start;
-      for (var s = 0; s < ranges.length && pos < end; s++) {
+      var pos = starts[n];
+      while (s < ranges.length && pos < end) {
         final (rs, re) = ranges[s];
-        if (re <= pos || rs >= end) continue;
+        if (re <= pos) {
+          s++;
+          continue;
+        }
+        if (rs >= end) break;
         final a = rs > pos ? rs : pos;
         final b = re < end ? re : end;
         if (a > pos) pieces.add(dom.Text(plain.substring(pos, a)));
@@ -181,7 +260,7 @@ class ChapterProcessor {
   /// Sentence spans of plain [text] as [start, end) offsets, excluding the
   /// whitespace between sentences. A sentence ends at . ! or ? (plus any
   /// closing quotes/brackets) followed by whitespace, except after a common
-  /// abbreviation.
+  /// abbreviation or an initial.
   static List<(int, int)> sentenceRanges(String text) {
     final ranges = <(int, int)>[];
     var i = 0;
@@ -217,18 +296,19 @@ class ChapterProcessor {
     return ranges;
   }
 
-  /// Plain-text sentences of [text] (used by tests and callers that only
-  /// need the split, not the page markup).
-  static List<String> splitIntoSentences(String text) =>
-      [for (final (a, b) in sentenceRanges(text)) text.substring(a, b)];
-
-  /// True when the '.' at [dot] ends a word like "Mr" or "etc".
+  /// True when the '.' at [dot] ends a word like "Mr" or "etc", or an
+  /// initial ("J. R. R. Tolkien").
   static bool _followsAbbreviation(String text, int dot) {
     var start = dot;
     while (start > 0 && _letter.hasMatch(text[start - 1])) {
       start--;
     }
     if (start == dot) return false;
-    return _abbreviations.contains(text.substring(start, dot).toLowerCase());
+    final word = text.substring(start, dot);
+    // "I" is left out: it ends sentences far more often than it starts names.
+    if (word.length == 1 && word != 'I' && word == word.toUpperCase()) {
+      return true;
+    }
+    return _abbreviations.contains(word.toLowerCase());
   }
 }

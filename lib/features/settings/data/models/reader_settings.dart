@@ -114,12 +114,16 @@ class ReaderSettings extends Equatable {
   // Convenience getter for backward compatibility
   ReaderTheme get theme => readerTheme;
 
+  static const Object _unchanged = Object();
+
+  /// [selectedCustomFontId] can be set to null (no custom font selected);
+  /// leaving it out keeps the current one.
   ReaderSettings copyWith({
     ReaderTheme? appTheme,
     ReaderTheme? readerTheme,
     ReaderFont? font,
     List<CustomFont>? customFonts,
-    String? selectedCustomFontId,
+    Object? selectedCustomFontId = _unchanged,
     double? fontSize,
     double? lineHeight,
     double? paragraphSpacing,
@@ -132,7 +136,9 @@ class ReaderSettings extends Equatable {
       readerTheme: readerTheme ?? this.readerTheme,
       font: font ?? this.font,
       customFonts: customFonts ?? this.customFonts,
-      selectedCustomFontId: selectedCustomFontId ?? this.selectedCustomFontId,
+      selectedCustomFontId: identical(selectedCustomFontId, _unchanged)
+          ? this.selectedCustomFontId
+          : selectedCustomFontId as String?,
       fontSize: fontSize ?? this.fontSize,
       lineHeight: lineHeight ?? this.lineHeight,
       paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,

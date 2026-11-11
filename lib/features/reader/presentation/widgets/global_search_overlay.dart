@@ -42,12 +42,15 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
     super.dispose();
   }
 
+  /// Shorter queries match on nearly every line.
+  static const _minQueryLength = 2;
+
   Future<void> _performSearch(String query) async {
     final q = query.trim();
     if (q == _lastQuery) return;
     _lastQuery = q;
 
-    if (q.isEmpty) {
+    if (q.length < _minQueryLength) {
       setState(() {
         _searchResults = [];
         _isSearching = false;
@@ -60,15 +63,28 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
       _searchResults = [];
     });
 
-    final results = await widget.notifier.searchAllChapters(q);
-
-    if (mounted && q == _lastQuery) {
-      setState(() {
-        _searchResults = results;
-        _isSearching = false;
-      });
+    List<GlobalSearchResult>? results;
+    try {
+      results = await widget.notifier.searchAllChapters(q);
+    } catch (e) {
+      debugPrint('Search failed: $e');
     }
+    // A newer search has taken over: these are for an old query.
+    if (!mounted || q != _lastQuery) return;
+    // Let the same query be tried again after a failure.
+    if (results == null) _lastQuery = '';
+    setState(() {
+      _searchResults = results ?? [];
+      _isSearching = false;
+    });
   }
+
+  /// The search for what is in the field has finished and found nothing.
+  bool get _noMatches =>
+      !_isSearching &&
+      _searchResults.isEmpty &&
+      _lastQuery.length >= _minQueryLength &&
+      _lastQuery == _searchController.text.trim();
 
   @override
   Widget build(BuildContext context) {
@@ -108,8 +124,9 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                       textInputAction: TextInputAction.search,
                       onSubmitted: _performSearch,
                       onChanged: (val) {
-                        // Optional: Debounce this for live search
-                        // For now we trigger on submit or with a slight delay
+                        // The clear button and empty state follow the text.
+                        setState(() {});
+                        // Search once typing pauses.
                         Future.delayed(const Duration(milliseconds: 500), () {
                           if (mounted && _searchController.text == val) {
                             _performSearch(val);
@@ -133,6 +150,7 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                                 ),
                                 onPressed: () {
                                   _searchController.clear();
+                                  setState(() {});
                                   _performSearch('');
                                 },
                               )
@@ -171,7 +189,7 @@ class _GlobalSearchOverlayState extends State<GlobalSearchOverlay> {
                         strokeWidth: 2,
                       ),
                     )
-                  : _searchResults.isEmpty && _searchController.text.isNotEmpty
+                  : _noMatches
                   ? Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,

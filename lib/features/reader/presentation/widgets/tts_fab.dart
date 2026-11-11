@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import '../../../settings/data/models/reader_settings.dart';
 import '../../../tts/data/models/tts_settings.dart';
 import '../../../tts/presentation/providers/tts_notifier.dart';
 import 'package:velum/core/theme/app_colors.dart';
+import 'package:velum/core/motion/motion.dart';
 
 class TtsFab extends StatelessWidget {
   final TtsNotifier ttsNotifier;
@@ -14,10 +14,10 @@ class TtsFab extends StatelessWidget {
 
   /// Play/pause. The reader decides where playback starts (what's on screen).
   final VoidCallback onPressed;
+
   /// Distance above the Scaffold's default FAB position.
   final double bottomMargin;
   final bool isOverlayOpen;
-  final ReaderTheme readerTheme;
 
   /// Key placed on the visual FAB group so the
   /// tutorial spotlight resolves the correct on-screen position.
@@ -30,7 +30,6 @@ class TtsFab extends StatelessWidget {
     required this.onPressed,
     required this.bottomMargin,
     required this.isOverlayOpen,
-    required this.readerTheme,
     this.spotlightKey,
   });
 
@@ -50,8 +49,8 @@ class TtsFab extends StatelessWidget {
     // is visible. Unlike AnimatedSlide, margin changes go through layout so the
     // hit-test area follows the visual position exactly.
     return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
+      duration: Motion.fast,
+      curve: Motion.smoothOut,
       margin: EdgeInsets.only(bottom: bottomMargin),
       child: Stack(
         key: spotlightKey,
@@ -67,30 +66,37 @@ class TtsFab extends StatelessWidget {
               HapticFeedback.lightImpact();
               onPressed();
             },
-            child: Icon(isPlaying ? Icons.pause : Icons.play_arrow),
+            child: MotionSwap.icon(
+              child: Icon(
+                isPlaying ? Icons.pause : Icons.play_arrow,
+                key: ValueKey(isPlaying),
+              ),
+            ),
           ),
           // Moon badge — top-left of FAB while a sleep timer is set
           if (ttsNotifier.sleepTimer != SleepTimer.off)
             Positioned(
               top: -4,
               left: -4,
-              child: Container(
-                padding: const EdgeInsets.all(3),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withAlpha(40),
-                      blurRadius: 3,
-                      offset: const Offset(0, 1),
-                    ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.bedtime,
-                  size: 12,
-                  color: AppColors.accent,
+              child: _BadgePop(
+                child: Container(
+                  padding: const EdgeInsets.all(3),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(40),
+                        blurRadius: 3,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: const Icon(
+                    Icons.bedtime,
+                    size: 12,
+                    color: AppColors.accent,
+                  ),
                 ),
               ),
             ),
@@ -99,35 +105,59 @@ class TtsFab extends StatelessWidget {
             Positioned(
               bottom: -4,
               right: -4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 5,
-                  vertical: 1,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withAlpha(40),
-                      blurRadius: 3,
-                      offset: const Offset(0, 1),
+              child: _BadgePop(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withAlpha(40),
+                        blurRadius: 3,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
+                  ),
+                  child: Text(
+                    '$percent%',
+                    style: const TextStyle(
+                      color: AppColors.accent,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
+                      height: 1.3,
                     ),
-                  ],
-                ),
-                child: Text(
-                  '$percent%',
-                  style: const TextStyle(
-                    color: AppColors.accent,
-                    fontSize: 9,
-                    fontWeight: FontWeight.w700,
-                    height: 1.3,
                   ),
                 ),
               ),
             ),
         ],
       ),
+    );
+  }
+}
+
+/// A small badge popping onto the button with a slight overshoot.
+class _BadgePop extends StatelessWidget {
+  final Widget child;
+
+  const _BadgePop({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (Motion.reduced(context)) return child;
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: Motion.verySlow,
+      curve: Motion.bounce,
+      builder: (context, t, child) => Opacity(
+        opacity: t.clamp(0.0, 1.0),
+        child: Transform.scale(scale: 0.4 + 0.6 * t, child: child),
+      ),
+      child: child,
     );
   }
 }

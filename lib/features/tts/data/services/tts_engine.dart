@@ -32,6 +32,10 @@ abstract class TtsEngine {
   /// Resume after [pause]. Only called when [supportsResume] is true;
   /// otherwise the caller re-speaks the current chunk.
   Future<void> resume() async {}
+
+  /// Whether the engine holds a paused utterance right now. False for an
+  /// engine that can't resume, and after a pause that came before any
+  /// audio was ready.
   bool get supportsResume => false;
 
   List<TtsVoice> get voices;
